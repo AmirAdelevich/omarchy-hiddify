@@ -41,10 +41,21 @@ def private_state():
     STATE.mkdir(parents=True, exist_ok=True, mode=0o700)
     STATE.chmod(0o700)
 
-def installed(): return bool(shutil.which('hiddify'))
+def executable():
+    return shutil.which('hiddify') or shutil.which('hiddify', path='/usr/bin')
+
+def installed():
+    return executable() is not None
+
 def version():
-    p = subprocess.run(['pacman','-Q','hiddify'],capture_output=True,text=True,timeout=5)
-    return p.stdout.strip().split(' ',1)[-1] if p.returncode == 0 else ''
+    path = executable()
+    if path is None: return ''
+    owner = subprocess.run(['/usr/bin/pacman', '-Qoq', path],
+                           capture_output=True, text=True, timeout=5)
+    if owner.returncode != 0: return ''
+    package = subprocess.run(['/usr/bin/pacman', '-Q', '--', owner.stdout.strip()],
+                             capture_output=True, text=True, timeout=5)
+    return package.stdout.strip().split(' ', 1)[-1] if package.returncode == 0 else ''
 
 def compatible(): return version().split('-',1)[0] == CATALOG['hiddifyVersion']
 
@@ -62,8 +73,9 @@ def require_offline():
     if not compatible(): raise UserError('unsupported_version')
 
 def launch():
-    if not installed(): raise UserError('not_installed')
-    subprocess.Popen(['hiddify'],stdin=subprocess.DEVNULL,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL,start_new_session=True)
+    path = executable()
+    if path is None: raise UserError('not_installed')
+    subprocess.Popen([path],stdin=subprocess.DEVNULL,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL,start_new_session=True)
 
 def snapshot():
     private_state(); folder=STATE/'backups'/(dt.datetime.now().strftime('%Y%m%d-%H%M%S-')+uuid.uuid4().hex[:8])
@@ -235,16 +247,21 @@ def download(url):
     except UserError: raise
     except Exception: raise UserError('download_failed') from None
 
-def cli_path():
-    path=pathlib.Path('/usr/lib/hiddify/HiddifyCli')
-    if not path.is_file(): raise UserError('not_installed')
-    return str(path)
+def cli_command():
+    path = executable()
+    if path is None: raise UserError('not_installed')
+    if path == '/usr/bin/hiddify' and pathlib.Path('/opt/hiddify/Hiddify.AppImage').is_file():
+        return [path, 'HiddifyCli']
+    for directory in (pathlib.Path(path).resolve().parent, pathlib.Path('/usr/lib/hiddify')):
+        cli = directory / 'HiddifyCli'
+        if cli.is_file() and os.access(cli, os.X_OK): return [str(cli)]
+    raise UserError('not_installed')
 
 def parse_subscription(body,folder):
     raw=folder/'raw';atomic(raw,body)
     out=folder/'config.json'
     try:
-        p=subprocess.run([cli_path(),'parse',str(raw),'-o',str(out)],cwd=folder,
+        p=subprocess.run([*cli_command(),'parse',str(raw),'-o',str(out)],cwd=folder,
                          stdin=subprocess.DEVNULL,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL,timeout=30)
         if p.returncode!=0 or not out.exists(): raise UserError('invalid_subscription')
         if out.stat().st_size>MAX_BODY: raise UserError('subscription_too_large')
