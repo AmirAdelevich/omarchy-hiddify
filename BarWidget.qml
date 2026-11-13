@@ -34,7 +34,6 @@ Ui.Panel {
   property bool stopping: false
   property bool stoppedByPlugin: false
   property int stopTicks: 0
-  property bool installationAttempted: false
   readonly property bool busy: stopping || connectionPending || (worker.running && request.action !== "inspect")
   readonly property int changeCount: Object.keys(changes).length
   readonly property color foreground: Commons.Color.popups.text
@@ -85,7 +84,7 @@ Ui.Panel {
     run({action: "hide_window"})
   }
   function openApp(path) {
-    if (!appData.installed) { install(); return }
+    if (!appData.installed) { updateHiddify(); return }
     if (path) Quickshell.execDetached(["hiddify", "hiddify:///" + path])
     else run({action: "show_window"})
   }
@@ -108,12 +107,6 @@ Ui.Panel {
     running: true
     triggeredOnStart: true
     onTriggered: updateCheck.running = true
-  }
-  function install() {
-    if (installationAttempted || busy) return
-    installationAttempted = true
-    showMessage("installing", false)
-    Quickshell.execDetached(["omarchy", "launch", "terminal", "bash", Qt.resolvedUrl("install.sh").toString().replace(/^file:\/\//, "")])
   }
   function toggleConnection() {
     if (!trayItem) { openApp(); showMessage("start_first", false); return }
@@ -163,7 +156,6 @@ Ui.Panel {
       for (var i = 0; i < result.settings.length; i++) b[result.settings[i].key] = result.settings[i].value
       // Do not replace the baseline while the user has unsaved changes.
       if (!changeCount) prefsBaseline = b
-      if (!result.installed && !installationAttempted) Qt.callLater(install)
     } else if (request.action === "hide_window" || request.action === "show_window") {
       return
     } else if (request.action === "validate_settings") {
@@ -305,13 +297,18 @@ Ui.Panel {
           visible: !root.appData.installed
           Layout.fillWidth: true
           Plain { text: root.t("not_installed"); wrapMode: Text.Wrap; Layout.fillWidth: true }
-          ActionButton { text: root.t("retry_install"); onClicked: { root.installationAttempted = false; root.install() } }
         }
         Plain {
           visible: root.appData.installed && !root.appData.compatible
           Layout.fillWidth: true
           wrapMode: Text.Wrap
           text: root.t("unsupported_version")
+        }
+        ActionButton {
+          visible: root.section === "home"
+          Layout.fillWidth: true
+          text: root.t("update_hiddify") + (root.hiddifyUpdate ? " · " + root.hiddifyUpdate : "")
+          onClicked: root.updateHiddify()
         }
         QQC.ScrollView {
           Layout.fillWidth: true
@@ -323,11 +320,6 @@ Ui.Panel {
             width: parent.width
             spacing: Commons.Style.space(12)
             Plain { text: root.t("dashboard_hint"); wrapMode: Text.Wrap; Layout.fillWidth: true }
-            ActionButton {
-              visible: root.appData.installed
-              text: root.t("update_hiddify") + (root.hiddifyUpdate ? " · " + root.hiddifyUpdate : "")
-              onClicked: root.updateHiddify()
-            }
             ActionButton {
               text: root.t("update_plugin")
               onClicked: Quickshell.execDetached(["omarchy", "launch", "terminal", "bash", "-c",
