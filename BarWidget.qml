@@ -90,9 +90,18 @@ Ui.Panel {
   }
   property string hiddifyUpdate: ""
   function updateHiddify() {
-    Quickshell.execDetached(["omarchy", "launch", "terminal", "bash", "-c",
-      'python3 "$1"; read -r', "hiddify-update",
-      Qt.resolvedUrl("update_hiddify.py").toString().replace(/^file:\/\//, "")])
+    showMessage("update_terminal", false)
+    updateTerminal.running = true
+  }
+  Process {
+    id: updateTerminal
+    command: ["/usr/bin/xdg-terminal-exec", "--", "/usr/bin/bash", "-c",
+      'printf "Hiddify update\\n"; /usr/bin/python3 "$1"; printf "\\nPress Enter to close. "; read -r',
+      "hiddify-update", Qt.resolvedUrl("update_hiddify.py").toString().replace(/^file:\/\//, "")]
+    onExited: function(exitCode) {
+      if (exitCode !== 0) root.showMessage("update_terminal_failed", true)
+      root.refresh()
+    }
   }
   Process {
     id: updateCheck

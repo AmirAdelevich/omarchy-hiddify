@@ -9,6 +9,8 @@
   "connected": "Hiddify — подключён",
   "disconnected": "Hiddify — отключён",
   "bar_actions": "ЛКМ: панель · ПКМ: свернуть окно Hiddify",
+  "update_terminal": "Проверка обновления Hiddify запущена в терминале.",
+  "update_terminal_failed": "Не удалось открыть терминал обновления Hiddify.",
   "update_hiddify": "Установить / обновить Hiddify",
   "update_plugin": "Обновить расширение",
   "open_app": "Приложение",

@@ -9,6 +9,8 @@
   "connected": "Hiddify — connected",
   "disconnected": "Hiddify — disconnected",
   "bar_actions": "Left: panel · Right: hide Hiddify window",
+  "update_terminal": "Checking for a Hiddify update in the terminal.",
+  "update_terminal_failed": "Could not open the Hiddify update terminal.",
   "update_hiddify": "Install / update Hiddify",
   "update_plugin": "Update extension",
   "open_app": "Open app",
