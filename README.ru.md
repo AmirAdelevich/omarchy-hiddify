@@ -33,7 +33,7 @@
 Скопируйте runtime-файлы в `~/.config/omarchy/plugins/msi.hiddify/`:
 
 ```
-manifest.json BarWidget.qml Model.js backend.py catalog.json install.sh corebridge-bin i18n/
+manifest.json BarWidget.qml Language.qml Model.js backend.py catalog.json install.sh corebridge-bin i18n/
 ```
 
 Затем:
