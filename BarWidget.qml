@@ -303,6 +303,11 @@ Ui.Panel {
             width: parent.width
             spacing: Commons.Style.space(12)
             Plain { text: root.t("dashboard_hint"); wrapMode: Text.Wrap; Layout.fillWidth: true }
+            ActionButton {
+              text: root.t("update_plugin")
+              onClicked: Quickshell.execDetached(["omarchy", "launch", "terminal", "bash", "-c",
+                'omarchy plugin update msi.hiddify --yes; read -r'])
+            }
             Plain { text: strings.tn("profiles_count", root.profilesData.length).arg(strings.number((root.profilesData).length)) }
             Repeater {
               model: root.profilesData

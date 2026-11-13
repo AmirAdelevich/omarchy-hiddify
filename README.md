@@ -27,6 +27,14 @@ omarchy plugin add https://github.com/AmirAdelevich/omarchy-hiddify --enable
 
 The plugin ID is `msi.hiddify`. Left-click its bar icon to open the panel; right-click to hide the Hiddify window. Use Open app to restore it and the panel switch to toggle the connection. Missing Hiddify is installed through `omarchy pkg add hiddify`, with `omarchy pkg aur add hiddify` as a fallback. Enter any requested password in the installer terminal. Installing from AUR follows the usual AUR build process.
 
+## Update
+
+Select **Update extension** on the panel’s Home tab. On devices with an older version, run:
+
+```bash
+omarchy plugin update msi.hiddify --yes
+```
+
 ## Language
 
 The plugin follows the live language selected in **Omarchy Setup → Language**. If no Omarchy language has been selected, it uses `LC_ALL`, `LC_MESSAGES`, `LANGUAGE`, then `LANG`. Russian locales select Russian; English and other locales use English. No shell restart is required when changing the Omarchy language.
