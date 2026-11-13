@@ -1,0 +1,22 @@
+{
+  "schemaVersion": 1,
+  "id": "msi.hiddify",
+  "name": "Hiddify",
+  "version": "2.1.0",
+  "author": "AmirAdelevich",
+  "description": "Hiddify control panel with automatic installation, subscription import and native settings",
+  "kinds": [
+    "bar-widget"
+  ],
+  "entryPoints": {
+    "barWidget": "BarWidget.qml"
+  },
+  "barWidget": {
+    "displayName": "Hiddify",
+    "description": "Hiddify control panel with automatic installation, subscription import and native settings",
+    "category": "Network",
+    "defaultSection": "right",
+    "allowMultiple": false
+  },
+  "license": "MIT"
+}
