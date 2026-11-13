@@ -49,6 +49,10 @@ def install(build):
         package = owner
     if backend.running():
         raise RuntimeError('Quit Hiddify from its tray menu, then retry.')
+    mode_key = 'flutter.service-mode'
+    saved_mode = backend.read_json(backend.PREFS, {}).get(mode_key)
+    if saved_mode in ('vpn', 'proxy', 'system-proxy', 'router'):
+        print(f'Keeping Hiddify mode: {saved_mode}', flush=True)
     url = f'https://github.com/hiddify/hiddify-app/releases/download/v{version}/{name}'
     with tempfile.TemporaryDirectory(prefix='hiddify-update-') as directory:
         root = pathlib.Path(directory)
@@ -80,7 +84,14 @@ package() {{
         env = dict(backend.os.environ, PKGDEST=directory)
         subprocess.run(['makepkg', '--noconfirm'], cwd=root, env=env, check=True)
         artifact, = root.glob('*.pkg.tar.*')
+        if backend.running():
+            raise RuntimeError('Quit Hiddify from its tray menu, then retry.')
         subprocess.run(['sudo', 'pacman', '-U', str(artifact)], check=True)
+    if saved_mode in ('vpn', 'proxy', 'system-proxy', 'router') and not backend.running():
+        prefs = backend.read_json(backend.PREFS, {})
+        if prefs.get(mode_key) != saved_mode:
+            prefs[mode_key] = saved_mode
+            backend.save_json(backend.PREFS, prefs)
 
 
 if __name__ == '__main__':
