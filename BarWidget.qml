@@ -89,6 +89,26 @@ Ui.Panel {
     if (path) Quickshell.execDetached(["hiddify", "hiddify:///" + path])
     else run({action: "show_window"})
   }
+  property string hiddifyUpdate: ""
+  function updateHiddify() {
+    Quickshell.execDetached(["omarchy", "launch", "terminal", "bash", "-c",
+      'python3 "$1"; read -r', "hiddify-update",
+      Qt.resolvedUrl("update_hiddify.py").toString().replace(/^file:\/\//, "")])
+  }
+  Process {
+    id: updateCheck
+    command: ["python3", Qt.resolvedUrl("update_hiddify.py").toString().replace(/^file:\/\//, ""), "--check"]
+    stdout: StdioCollector {
+      onStreamFinished: root.hiddifyUpdate = /^\d+\.\d+\.\d+$/.test(text.trim()) ? text.trim() : ""
+    }
+  }
+  Timer {
+    interval: 3600000
+    repeat: true
+    running: true
+    triggeredOnStart: true
+    onTriggered: updateCheck.running = true
+  }
   function install() {
     if (installationAttempted || busy) return
     installationAttempted = true
@@ -303,6 +323,11 @@ Ui.Panel {
             width: parent.width
             spacing: Commons.Style.space(12)
             Plain { text: root.t("dashboard_hint"); wrapMode: Text.Wrap; Layout.fillWidth: true }
+            ActionButton {
+              visible: root.appData.installed
+              text: root.t("update_hiddify") + (root.hiddifyUpdate ? " · " + root.hiddifyUpdate : "")
+              onClicked: root.updateHiddify()
+            }
             ActionButton {
               text: root.t("update_plugin")
               onClicked: Quickshell.execDetached(["omarchy", "launch", "terminal", "bash", "-c",
