@@ -81,11 +81,13 @@ Ui.Panel {
     worker.running = true
   }
   function refresh() { if (!busy && !worker.running) run({action: "inspect"}) }
+  function hideApp() {
+    run({action: "hide_window"})
+  }
   function openApp(path) {
     if (!appData.installed) { install(); return }
     if (path) Quickshell.execDetached(["hiddify", "hiddify:///" + path])
-    else if (trayItem && !trayItem.onlyMenu) trayItem.activate()
-    else Quickshell.execDetached(["hiddify"])
+    else run({action: "show_window"})
   }
   function install() {
     if (installationAttempted || busy) return
@@ -142,6 +144,8 @@ Ui.Panel {
       // Do not replace the baseline while the user has unsaved changes.
       if (!changeCount) prefsBaseline = b
       if (!result.installed && !installationAttempted) Qt.callLater(install)
+    } else if (request.action === "hide_window" || request.action === "show_window") {
+      return
     } else if (request.action === "validate_settings") {
       Qt.callLater(function() { root.offline({action: "save_settings", changes: root.changes, baseline: root.prefsBaseline}) })
     } else if (result.prepared) {
@@ -205,7 +209,7 @@ Ui.Panel {
     tooltipText: Model.safeTooltip(root.t(root.connected ? "connected" : "disconnected") + "\n" + root.t("bar_actions"))
     iconComponent: root.trayItem ? appIcon : null
     onPressed: function(mouseButton) {
-      if (mouseButton === Qt.RightButton) root.toggleConnection()
+      if (mouseButton === Qt.RightButton) root.hideApp()
       else root.toggle()
     }
   }
@@ -228,6 +232,7 @@ Ui.Panel {
     open: root.opened
     contentWidth: panel.fittedContentWidth(Commons.Style.space(500))
     contentHeight: panel.fittedContentHeight(Commons.Style.space(620), Commons.Style.space(700))
+    padding: Commons.Style.space(18)
     focusTarget: panel.loadedContent
     content: FocusScope {
       readonly property real settingsScroll: settingList.contentY
@@ -239,12 +244,14 @@ Ui.Panel {
         spacing: Commons.Style.space(12)
         RowLayout {
           Layout.fillWidth: true
+          spacing: Commons.Style.space(12)
           ColumnLayout {
             Layout.fillWidth: true
             Plain { text: "Hiddify"; font.pixelSize: Commons.Style.font.heading; font.bold: true }
             Plain { text: root.appData.version + " · " + root.t(root.connected ? "connected" : "disconnected"); opacity: 0.7 }
           }
           ActionButton { text: root.t("open_app"); onClicked: root.openApp() }
+          Item { Layout.preferredWidth: Commons.Style.space(4) }
           Ui.ToggleSwitch {
             id: connectionSwitch
             Layout.alignment: Qt.AlignVCenter

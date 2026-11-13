@@ -25,7 +25,7 @@ Requires Omarchy Quattro, Python 3 and Hiddify **5.5.5** for native settings/pro
 omarchy plugin add https://github.com/AmirAdelevich/omarchy-hiddify --enable
 ```
 
-The plugin ID is `msi.hiddify`. Left-click its bar icon to open the panel; right-click to toggle the connection. Missing Hiddify is installed through `omarchy pkg add hiddify`, with `omarchy pkg aur add hiddify` as a fallback. Enter any requested password in the installer terminal. Installing from AUR follows the usual AUR build process.
+The plugin ID is `msi.hiddify`. Left-click its bar icon to open the panel; right-click to hide the Hiddify window. Use Open app to restore it and the panel switch to toggle the connection. Missing Hiddify is installed through `omarchy pkg add hiddify`, with `omarchy pkg aur add hiddify` as a fallback. Enter any requested password in the installer terminal. Installing from AUR follows the usual AUR build process.
 
 ## Language
 

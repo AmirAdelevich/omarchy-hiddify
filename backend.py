@@ -77,6 +77,28 @@ def launch():
     if path is None: raise UserError('not_installed')
     subprocess.Popen([path],stdin=subprocess.DEVNULL,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL,start_new_session=True)
 
+HIDDEN_WORKSPACE = 'special:omarchy-hiddify'
+
+def window_action(show):
+    clients = subprocess.run(['hyprctl', '-j', 'clients'], capture_output=True,
+                             text=True, check=True, timeout=5)
+    for window in json.loads(clients.stdout):
+        if window.get('class') != 'app.hiddify.com': continue
+        address = window.get('address', '')
+        if not re.fullmatch(r'0x[0-9a-fA-F]+', address): continue
+        selector = json.dumps('address:' + address)
+        if not show or window.get('workspace', {}).get('name') == HIDDEN_WORKSPACE:
+            workspace = 'hl.get_active_workspace()' if show else json.dumps(HIDDEN_WORKSPACE)
+            command = f'hl.dsp.window.move({{window = {selector}, workspace = {workspace}, follow = false}})'
+            subprocess.run(['hyprctl', 'dispatch', command], check=True, timeout=5,
+                           stdout=subprocess.DEVNULL)
+        if show:
+            subprocess.run(['hyprctl', 'dispatch', f'hl.dsp.focus({{window = {selector}}})'],
+                           check=True, timeout=5, stdout=subprocess.DEVNULL)
+        return {}
+    if show: launch()
+    return {}
+
 def snapshot():
     private_state(); folder=STATE/'backups'/(dt.datetime.now().strftime('%Y%m%d-%H%M%S-')+uuid.uuid4().hex[:8])
     folder.mkdir(parents=True,mode=0o700)
@@ -389,6 +411,7 @@ def main(req):
         if not any(g['name']==group and g.get('transport')=='grpc' for g in server_groups()): raise UserError('api_unavailable')
         core_request('test',group=group)
         return {'message':'testing_servers'}
+    if action in ('hide_window', 'show_window'): return window_action(action == 'show_window')
     if action=='open': launch();return {'message':'opened'}
     if action=='prepare_import': return prepare_import(req)
     if action=='validate_settings': validate_changes(req.get('changes'));return {'message':'validated'}
