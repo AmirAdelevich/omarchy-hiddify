@@ -6,6 +6,8 @@ import re
 import shutil
 import subprocess
 import tempfile
+import sys
+import time
 
 import backend
 
@@ -50,6 +52,22 @@ package() {{
 """
 
 
+def close_running_app(strings):
+    if not backend.running():
+        return False
+    print(strings['installer_closing'], flush=True)
+    result = subprocess.run(['omarchy-shell', 'msi.hiddify', 'quitApp'],
+                            capture_output=True, text=True, timeout=5)
+    if result.returncode or result.stdout.strip() != 'ok':
+        raise RuntimeError(strings['close_app_first'])
+    deadline = time.monotonic() + 30
+    while backend.running():
+        if time.monotonic() >= deadline:
+            raise RuntimeError(strings['close_app_first'])
+        time.sleep(0.2)
+    return True
+
+
 def main(language='en', check=False):
     strings = backend.read_json(backend.ROOT / 'i18n' / (language + '.json'), {})
 
@@ -62,8 +80,6 @@ def main(language='en', check=False):
     if check:
         print(release['version'])
         return
-    if backend.running():
-        raise RuntimeError(strings['close_app_first'])
     package = 'hiddify-app-bin'
     if backend.installed():
         package = subprocess.check_output(['pacman', '-Qoq', backend.executable()], text=True).strip()
@@ -71,41 +87,48 @@ def main(language='en', check=False):
     recipe = package_recipe(release, machine, package)
     kind = strings['prerelease' if release.get('prerelease') else 'stable_release']
     print(strings['installer_updating'].replace('%1', release['version']).replace('%2', kind), flush=True)
-    with tempfile.TemporaryDirectory(prefix='hiddify-update-') as directory:
-        work = pathlib.Path(directory)
-        (work / 'PKGBUILD').write_text(recipe)
-        (work / 'hiddify').write_text('#!/bin/sh\nexec /opt/hiddify/Hiddify.AppImage "$@"\n')
-        (work / 'hiddify.desktop').write_text(
-            '[Desktop Entry]\nType=Application\nName=Hiddify\nExec=hiddify %U\n'
-            'Icon=hiddify\nTerminal=false\nCategories=Network;\n'
-            'MimeType=x-scheme-handler/hiddify;\n')
-        icon = pathlib.Path('/usr/share/icons/hicolor/256x256/apps/hiddify.png')
-        if icon.is_file():
-            shutil.copy2(icon, work / 'hiddify.png')
-        backend.private_state()
-        with (backend.STATE / 'write.lock').open('a') as lock:
-            backend.fcntl.flock(lock, backend.fcntl.LOCK_EX)
-            if backend.running():
-                raise RuntimeError(strings['close_app_first'])
-            mode_key = 'flutter.service-mode'
-            saved_mode = backend.read_json(backend.PREFS, {}).get(mode_key)
-            environment = dict(backend.os.environ, PKGDEST=directory)
-            subprocess.run(['makepkg', '--syncdeps'], cwd=work, check=True, env=environment)
-            artifacts = subprocess.check_output(['makepkg', '--packagelist'], cwd=work,
-                                                text=True, env=environment).splitlines()
-            if len(artifacts) != 1:
-                raise RuntimeError('Expected one Hiddify package')
-            artifact = pathlib.Path(artifacts[0])
-            if artifact.parent != work or artifact.is_symlink() or not artifact.is_file():
-                raise RuntimeError('Invalid Hiddify package path')
-            if backend.running():
-                raise RuntimeError(strings['close_app_first'])
-            subprocess.run(['sudo', 'pacman', '-U', '--', str(artifact)], check=True)
-            if saved_mode in ('vpn', 'proxy', 'system-proxy', 'router') and not backend.running():
-                prefs = backend.read_json(backend.PREFS, {})
-                if prefs.get(mode_key) != saved_mode:
-                    prefs[mode_key] = saved_mode
-                    backend.save_json(backend.PREFS, prefs)
+    install_package(recipe, strings)
+
+
+def install_package(recipe, strings):
+    closed_app = close_running_app(strings)
+    try:
+        with tempfile.TemporaryDirectory(prefix='hiddify-update-') as directory:
+            work = pathlib.Path(directory)
+            (work / 'PKGBUILD').write_text(recipe)
+            (work / 'hiddify').write_text('#!/bin/sh\nexec /opt/hiddify/Hiddify.AppImage "$@"\n')
+            (work / 'hiddify.desktop').write_text(
+                '[Desktop Entry]\nType=Application\nName=Hiddify\nExec=hiddify %U\n'
+                'Icon=hiddify\nTerminal=false\nCategories=Network;\n'
+                'MimeType=x-scheme-handler/hiddify;\n')
+            icon = pathlib.Path('/usr/share/icons/hicolor/256x256/apps/hiddify.png')
+            if icon.is_file():
+                shutil.copy2(icon, work / 'hiddify.png')
+            backend.private_state()
+            with (backend.STATE / 'write.lock').open('a') as lock:
+                backend.fcntl.flock(lock, backend.fcntl.LOCK_EX)
+                closed_app = close_running_app(strings) or closed_app
+                mode_key = 'flutter.service-mode'
+                saved_mode = backend.read_json(backend.PREFS, {}).get(mode_key)
+                environment = dict(backend.os.environ, PKGDEST=directory)
+                subprocess.run(['makepkg', '--syncdeps'], cwd=work, check=True, env=environment)
+                artifacts = subprocess.check_output(['makepkg', '--packagelist'], cwd=work,
+                                                    text=True, env=environment).splitlines()
+                if len(artifacts) != 1:
+                    raise RuntimeError('Expected one Hiddify package')
+                artifact = pathlib.Path(artifacts[0])
+                if artifact.parent != work or artifact.is_symlink() or not artifact.is_file():
+                    raise RuntimeError('Invalid Hiddify package path')
+                closed_app = close_running_app(strings) or closed_app
+                subprocess.run(['sudo', 'pacman', '-U', '--', str(artifact)], check=True)
+                if saved_mode in ('vpn', 'proxy', 'system-proxy', 'router') and not backend.running():
+                    prefs = backend.read_json(backend.PREFS, {})
+                    if prefs.get(mode_key) != saved_mode:
+                        prefs[mode_key] = saved_mode
+                        backend.save_json(backend.PREFS, prefs)
+    finally:
+        if closed_app and backend.installed() and not backend.running():
+            backend.launch()
 
 
 if __name__ == '__main__':
@@ -113,4 +136,14 @@ if __name__ == '__main__':
     parser.add_argument('--language', choices=('en', 'ru'), default='en')
     parser.add_argument('--check', action='store_true')
     arguments = parser.parse_args()
-    main(arguments.language, arguments.check)
+    try:
+        main(arguments.language, arguments.check)
+    except KeyboardInterrupt:
+        raise SystemExit(130)
+    except (OSError, ValueError, RuntimeError, subprocess.SubprocessError, backend.UserError) as error:
+        if isinstance(error, subprocess.CalledProcessError):
+            catalog = backend.read_json(backend.ROOT / 'i18n' / (arguments.language + '.json'), {})
+            print(catalog['installer_stopped'], file=sys.stderr)
+        else:
+            print(str(error), file=sys.stderr)
+        raise SystemExit(1)

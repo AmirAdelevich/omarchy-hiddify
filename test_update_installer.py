@@ -40,6 +40,17 @@ class UpdateInstallerTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             package_recipe(self.release(), 'x86_64', 'other-package')
 
+    def test_cli_expected_error_is_reported_without_traceback(self):
+        import os
+        import pathlib
+        import subprocess
+        import sys
+        result = subprocess.run([sys.executable, str(pathlib.Path(__file__).with_name('update_hiddify.py'))],
+                                env={**os.environ, 'PATH': ''}, capture_output=True, text=True)
+        self.assertEqual(result.returncode, 1)
+        self.assertIn('makepkg', result.stderr)
+        self.assertNotIn('Traceback', result.stderr)
+
 
 class InstallerFlowTests(unittest.TestCase):
     def setUp(self):
@@ -94,9 +105,13 @@ class InstallerFlowTests(unittest.TestCase):
 
     def test_app_started_during_build_blocks_privileged_install(self):
         self.mocks[6].side_effect = [False, False, True]
+        import subprocess
+        self.mocks[-1].side_effect = lambda command, **kwargs: (self.commands.append(command) or subprocess.CompletedProcess(command, 1, stdout='busy'))
         with self.assertRaises(RuntimeError):
             self.updater.main('en')
-        self.assertEqual(self.commands, [['makepkg', '--syncdeps']])
+        self.assertEqual(self.commands[0], ['makepkg', '--syncdeps'])
+        self.assertEqual(self.commands[1], ['omarchy-shell', 'msi.hiddify', 'quitApp'])
+        self.assertFalse(any(command[0] == 'sudo' for command in self.commands))
 
     def test_failed_package_install_preserves_preferences(self):
         import subprocess
@@ -110,3 +125,56 @@ class InstallerFlowTests(unittest.TestCase):
         with self.assertRaises(subprocess.CalledProcessError):
             self.updater.main('ru')
         self.assertEqual(self.prefs.read_bytes(), before)
+
+    def test_running_app_is_closed_gracefully_and_relaunched_after_install(self):
+        from unittest import mock
+        import subprocess
+        running = True
+
+        def run(command, **kwargs):
+            nonlocal running
+            self.commands.append(command)
+            if command == ['omarchy-shell', 'msi.hiddify', 'quitApp']:
+                running = False
+                return subprocess.CompletedProcess(command, 0, stdout='ok')
+            return subprocess.CompletedProcess(command, 0)
+
+        self.mocks[6].side_effect = lambda: running
+        self.mocks[-1].side_effect = run
+        with mock.patch.object(self.updater.backend, 'launch') as launch:
+            self.updater.main('en')
+            launch.assert_called_once_with()
+        self.assertEqual(self.commands[0], ['omarchy-shell', 'msi.hiddify', 'quitApp'])
+        self.assertEqual(self.commands[1], ['makepkg', '--syncdeps'])
+        self.assertEqual(self.commands[2][:4], ['sudo', 'pacman', '-U', '--'])
+
+    def test_quit_timeout_does_not_install_or_kill_the_app(self):
+        from unittest import mock
+        import subprocess
+        self.mocks[6].return_value = True
+        self.mocks[-1].return_value = subprocess.CompletedProcess([], 0, stdout='ok')
+        self.mocks[-1].side_effect = None
+        with mock.patch.object(self.updater.time, 'monotonic', side_effect=[0, 31]):
+            with self.assertRaises(RuntimeError):
+                self.updater.main('en')
+        self.mocks[-1].assert_called_once()
+        self.assertEqual(self.mocks[-1].call_args.args[0], ['omarchy-shell', 'msi.hiddify', 'quitApp'])
+
+    def test_closed_app_is_relaunched_even_if_build_fails(self):
+        from unittest import mock
+        import subprocess
+        running = True
+
+        def run(command, **kwargs):
+            nonlocal running
+            if command[0] == 'omarchy-shell':
+                running = False
+                return subprocess.CompletedProcess(command, 0, stdout='ok')
+            raise subprocess.CalledProcessError(1, command)
+
+        self.mocks[6].side_effect = lambda: running
+        self.mocks[-1].side_effect = run
+        with mock.patch.object(self.updater.backend, 'launch') as launch:
+            with self.assertRaises(subprocess.CalledProcessError):
+                self.updater.main('en')
+            launch.assert_called_once_with()

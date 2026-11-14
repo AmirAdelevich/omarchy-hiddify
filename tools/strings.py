@@ -1,5 +1,8 @@
 import json,pathlib
 rows={
+'installer_stopped':('Installation stopped. Details are shown above.','Установка остановлена. Подробности показаны выше.'),
+'installer_closing':('Closing Hiddify before updating…','Закрываю Hiddify перед обновлением…'),
+'installer_updating_ui':('Updating Hiddify…','Обновление Hiddify…'),
 'api_auth_failed':('Hiddify’s local API rejected its saved key. Open the app’s server list.','Локальный API Hiddify отклонил сохранённый ключ. Откройте серверы в приложении.'),
 'status_unknown':('Unknown status','Статус неизвестен'),
 'status_starting':('Connecting…','Подключение…'),

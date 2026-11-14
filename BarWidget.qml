@@ -40,7 +40,9 @@ Ui.Panel {
   property bool stoppedByPlugin: false
   property int stopTicks: 0
   property bool installationAttempted: false
-  readonly property bool busy: stopping || connectionPending || (worker.running && request.action !== "inspect")
+  property bool resumeAfterUpdate: false
+  property int resumeTicks: 0
+  readonly property bool busy: stopping || connectionPending || updateTerminal.running || (worker.running && request.action !== "inspect")
   readonly property int changeCount: Object.keys(changes).length
   readonly property color foreground: Commons.Color.popups.text
   readonly property bool russian: strings.language === "ru"
@@ -87,7 +89,13 @@ Ui.Panel {
     var date = new Date(String(raw).replace(/\s+([+-]\d\d:\d\d)$/, "$1"))
     return isNaN(date.getTime()) ? String(raw) : date.toLocaleString(Qt.locale(strings.formatLocale), Locale.ShortFormat)
   }
-  function showMessage(key, error) { messageKey = key; messageError = !!error }
+  function showMessage(key, error) {
+    messageKey = key
+    messageError = !!error
+    if (error && key === "update_terminal_failed") messageExpiry.restart()
+    else messageExpiry.stop()
+  }
+  Timer { id: messageExpiry; interval: 10000; onTriggered: { root.messageKey = ""; root.messageError = false } }
   function valueFor(e) {
     if (changes[e.key] !== undefined) return changes[e.key] === null ? e.default : changes[e.key]
     return e.value
@@ -125,7 +133,17 @@ Ui.Panel {
     return t(updateData.status || "updates_not_checked")
   }
   function installUpdate() {
-    if (!updateTerminal.running) updateTerminal.running = true
+    if (busy) return
+    resumeAfterUpdate = connected
+    showMessage("installer_updating_ui", false)
+    updateTerminal.running = true
+  }
+  function quitApp(): string {
+    if (stopping || (worker.running && request.action !== "inspect")) return "busy"
+    var entry = Model.menuAction(nativeMenu.children.values, "quit")
+    if (!entry || !entry.enabled) return "unavailable"
+    entry.triggered()
+    return "ok"
   }
   Process {
     id: updateTerminal
@@ -135,7 +153,10 @@ Ui.Panel {
       strings.language, root.t("terminal_close")]
     onExited: function(exitCode) {
       if (exitCode !== 0) root.showMessage("update_terminal_failed", true)
+      else root.showMessage("installer_current", false)
       root.refresh()
+      root.checkUpdates(true)
+      if (root.resumeAfterUpdate) { root.resumeTicks = 0; resumeConnection.start() }
     }
   }
   function minimizeApp() {
@@ -284,6 +305,20 @@ Ui.Panel {
       }
     }
   }
+  Timer {
+    id: resumeConnection
+    interval: 500
+    repeat: true
+    onTriggered: {
+      root.resumeTicks++
+      if (root.resumeTicks >= 60) { stop(); root.resumeAfterUpdate = false; return }
+      if (root.connectionState === "on") { stop(); root.resumeAfterUpdate = false }
+      else if (root.connectionState === "off" && root.trayItem && !root.busy) {
+        var entry = Model.menuAction(nativeMenu.children.values, "connection")
+        if (entry && entry.enabled) { stop(); root.resumeAfterUpdate = false; root.toggleConnection() }
+      }
+    }
+  }
   Timer { id: hourlyUpdateCheck; interval: 3600000; onTriggered: root.checkUpdates(false) }
   Timer {
     id: stopWait
@@ -400,7 +435,7 @@ Ui.Panel {
         Plain {
           Layout.fillWidth: true
           visible: root.busy || root.messageKey !== ""
-          text: root.busy ? root.t(root.stopping ? "restarting" : "working") : root.t(root.messageKey)
+          text: root.busy ? root.t(root.stopping ? "restarting" : updateTerminal.running ? "installer_updating_ui" : "working") : root.t(root.messageKey)
           color: root.messageError ? Commons.Color.urgent : root.foreground
           wrapMode: Text.Wrap
         }
@@ -721,6 +756,7 @@ Ui.Panel {
     function open(): void { root.open() }
     function close(): void { root.close() }
     function minimize(): void { root.minimizeApp() }
+    function quitApp(): string { return root.quitApp() }
     function page(name: string): void {
       if (["home", "subscriptions", "servers", "settings"].indexOf(name) !== -1) { root.section = name; root.open() }
     }

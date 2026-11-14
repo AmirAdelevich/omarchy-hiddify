@@ -1,4 +1,7 @@
 {
+  "installer_stopped": "Installation stopped. Details are shown above.",
+  "installer_closing": "Closing Hiddify before updating…",
+  "installer_updating_ui": "Updating Hiddify…",
   "api_auth_failed": "Hiddify’s local API rejected its saved key. Open the app’s server list.",
   "status_unknown": "Unknown status",
   "status_starting": "Connecting…",

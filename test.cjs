@@ -84,3 +84,8 @@ for (const state of ["on","off","unknown","starting","stopping","reloading"])
 assert(source.includes('if (mouseButton === Qt.RightButton) root.toggleConnection()'));
 assert(!source.includes('if (mouseButton === Qt.RightButton) root.minimizeApp()'));
 assert(source.includes('function toggleConnection() {\n    if (busy) return'));
+
+assert(source.includes('function quitApp(): string'));
+assert(source.includes('showMessage("installer_updating_ui", false)'));
+assert(source.includes('id: messageExpiry'));
+assert(source.includes('root.checkUpdates(true)'));

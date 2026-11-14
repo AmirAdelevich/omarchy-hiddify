@@ -1,4 +1,7 @@
 {
+  "installer_stopped": "Установка остановлена. Подробности показаны выше.",
+  "installer_closing": "Закрываю Hiddify перед обновлением…",
+  "installer_updating_ui": "Обновление Hiddify…",
   "api_auth_failed": "Локальный API Hiddify отклонил сохранённый ключ. Откройте серверы в приложении.",
   "status_unknown": "Статус неизвестен",
   "status_starting": "Подключение…",
