@@ -2,6 +2,7 @@
 """Hiddify 5.5.5 adapter. JSON requests arrive on stdin, never in argv/logs."""
 import base64, contextlib, datetime as dt, fcntl, hashlib, json, os, pathlib, re
 import shutil, sqlite3, subprocess, sys, tempfile, time, urllib.parse, urllib.request, uuid
+from local_peer import AuthenticatedHTTPConnection
 
 ROOT = pathlib.Path(__file__).resolve().parent
 DATA = pathlib.Path(os.environ.get('XDG_DATA_HOME', pathlib.Path.home()/'.local/share'))/'app.hiddify.com'
@@ -77,27 +78,13 @@ def launch():
     if path is None: raise UserError('not_installed')
     subprocess.Popen([path],stdin=subprocess.DEVNULL,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL,start_new_session=True)
 
-HIDDEN_WORKSPACE = 'special:omarchy-hiddify'
-
 def window_action(show):
-    clients = subprocess.run(['hyprctl', '-j', 'clients'], capture_output=True,
-                             text=True, check=True, timeout=5)
-    for window in json.loads(clients.stdout):
-        if window.get('class') != 'app.hiddify.com': continue
-        address = window.get('address', '')
-        if not re.fullmatch(r'0x[0-9a-fA-F]+', address): continue
-        selector = json.dumps('address:' + address)
-        if not show or window.get('workspace', {}).get('name') == HIDDEN_WORKSPACE:
-            workspace = 'hl.get_active_workspace()' if show else json.dumps(HIDDEN_WORKSPACE)
-            command = f'hl.dsp.window.move({{window = {selector}, workspace = {workspace}, follow = false}})'
-            subprocess.run(['hyprctl', 'dispatch', command], check=True, timeout=5,
-                           stdout=subprocess.DEVNULL)
-        if show:
-            subprocess.run(['hyprctl', 'dispatch', f'hl.dsp.focus({{window = {selector}}})'],
-                           check=True, timeout=5, stdout=subprocess.DEVNULL)
-        return {}
-    if show: launch()
+    subprocess.run([sys.executable, str(ROOT / 'window-hiddify.py'),
+                    'restore' if show else 'minimize'], check=True, timeout=10)
+    if show:
+        launch()
     return {}
+
 
 def snapshot():
     private_state(); folder=STATE/'backups'/(dt.datetime.now().strftime('%Y%m%d-%H%M%S-')+uuid.uuid4().hex[:8])
@@ -125,17 +112,24 @@ def clash_request(path, payload=None):
     secret=api.get('secret','')
     if not isinstance(secret,str) or len(secret)>8192: raise UserError('api_unavailable')
     headers={'Authorization':'Bearer '+secret,'Content-Type':'application/json'}
-    request=urllib.request.Request('http://'+listen+path,headers=headers,
-        data=json.dumps(payload).encode() if payload is not None else None,
-        method='PUT' if payload is not None else 'GET')
-    # The API is loopback only: never pass authentication through a configured proxy.
-    opener=urllib.request.build_opener(urllib.request.ProxyHandler({}),NoRedirect())
     try:
-        with opener.open(request,timeout=1.5) as response:
-            data=response.read(MAX_BODY+1)
-            if len(data)>MAX_BODY: raise UserError('api_unavailable')
+        port = int(listen.rsplit(':', 1)[1])
+        connection = AuthenticatedHTTPConnection(port, {0, os.getuid()})
+        # connect() authenticates the established peer before request() writes
+        # either HTTP headers or the bearer. Redirects are never followed.
+        with contextlib.closing(connection):
+            connection.request('PUT' if payload is not None else 'GET', path,
+                               body=json.dumps(payload) if payload is not None else None,
+                               headers=headers)
+            response = connection.getresponse()
+            if response.status != 200 and response.status != 204:
+                raise UserError('api_unavailable')
+            data = response.read(MAX_BODY + 1)
+            if len(data) > MAX_BODY:
+                raise UserError('api_unavailable')
             return json.loads(data) if data else {}
-    except Exception: raise UserError('api_unavailable') from None
+    except Exception:
+        raise UserError('api_unavailable') from None
 
 def core_request(action, **args):
     binary=ROOT/'corebridge-bin'
@@ -402,8 +396,177 @@ def restore():
         else: dest.unlink(missing_ok=True)
     return {'message':'restored','backup':current.name}
 
+UPDATE_API_URL = 'https://api.github.com/repos/hiddify/hiddify-app/releases?per_page=20'
+UPDATE_INTERVAL = 3600
+UPDATE_RESPONSE_LIMIT = 1024 * 1024
+
+
+def release_version(value):
+    if not isinstance(value, str):
+        raise ValueError('Invalid release version')
+    match = re.fullmatch(r'v?(\d{1,6})\.(\d{1,6})\.(\d{1,6})(?:\.(\d{1,6}))?', value)
+    if not match:
+        raise ValueError('Invalid release version')
+    return tuple(int(part or 0) for part in match.groups())
+
+
+def installed_release_version(value):
+    upstream = value.split(':')[-1].rsplit('-', 1)[0]
+    return release_version(upstream)
+
+
+def fetch_latest_release():
+    request = urllib.request.Request(UPDATE_API_URL, headers={
+        'User-Agent': 'Omarchy-Hiddify-Update-Checker',
+        'Accept': 'application/vnd.github+json',
+    })
+    opener = urllib.request.build_opener(NoRedirect())
+    with opener.open(request, timeout=12) as response:
+        if response.status != 200:
+            raise ValueError('Release check failed')
+        raw = response.read(UPDATE_RESPONSE_LIMIT + 1)
+    if len(raw) > UPDATE_RESPONSE_LIMIT:
+        raise ValueError('Release response is too large')
+    releases = json.loads(raw)
+    if not isinstance(releases, list):
+        raise ValueError('Expected a release list')
+    candidates = []
+    for release in releases:
+        if not isinstance(release, dict) or release.get('draft') is not False:
+            continue
+        tag = release.get('tag_name')
+        try:
+            number = release_version(tag)
+        except ValueError:
+            continue
+        url = 'https://github.com/hiddify/hiddify-app/releases/tag/' + tag
+        if release.get('html_url') != url:
+            continue
+        candidates.append((number, {'version': tag.removeprefix('v'), 'url': url,
+                                    'assets': release.get('assets', []),
+                                    'prerelease': release.get('prerelease') is True}))
+    if not candidates:
+        raise ValueError('No versioned public release found')
+    return max(candidates, key=lambda candidate: candidate[0])[1]
+
+
+def load_update_state():
+    try:
+        state = read_json(STATE / 'updates.json', {})
+    except (OSError, ValueError, UserError):
+        state = {}
+    if not isinstance(state, dict):
+        state = {}
+    state.setdefault('enabled', True)
+    state.setdefault('checkedAt', 0)
+    state.setdefault('notifiedVersions', [])
+    return state
+
+
+def update_result(state, current):
+    now = time.time()
+    checked = state.get('checkedAt', 0)
+    if not isinstance(checked, (int, float)) or checked < 0 or checked > now:
+        checked = 0
+    result = {
+        'enabled': state.get('enabled') is not False,
+        'installedVersion': current,
+        'latestVersion': '',
+        'prerelease': None,
+        'releaseUrl': '',
+        'checkedAt': checked,
+        'status': 'updates_not_checked',
+        'nextCheckSeconds': max(1, int(checked + UPDATE_INTERVAL - now)),
+    }
+    if not current:
+        result['nextCheckSeconds'] = UPDATE_INTERVAL
+        result['status'] = 'not_installed'
+        return result
+    if state.get('error'):
+        result['status'] = 'update_check_failed'
+        return result
+    latest = state.get('latest')
+    if isinstance(latest, dict):
+        try:
+            available = release_version(latest.get('version')) > installed_release_version(current)
+        except (ValueError, AttributeError):
+            result['status'] = 'update_version_unknown'
+            return result
+        result.update(
+            latestVersion=latest['version'],
+            prerelease=latest.get('prerelease'),
+            releaseUrl=latest.get('url', ''),
+            status='update_available' if available else 'updates_current',
+        )
+    return result
+
+
+def notify_update(latest, language):
+    import html
+    locale = 'ru' if language == 'ru' else 'en'
+    catalog = read_json(ROOT / 'i18n' / (locale + '.json'), {})
+    title = catalog.get('update_notification_title', 'Hiddify update available')
+    body = catalog.get('update_notification_body', 'Hiddify %1 is available. Open the widget to update.')
+    body = body.replace('%1', latest['version'])
+    release_kind = 'prerelease' if latest.get('prerelease') is True else 'stable_release'
+    body = body.replace('%2', catalog.get(release_kind, 'Pre-release' if release_kind == 'prerelease' else 'Release'))
+    try:
+        process = subprocess.run(
+            ['notify-send', '--app-name=Hiddify', '--icon=hiddify', '--expire-time=12000',
+             '--', html.escape(title, quote=True), html.escape(body, quote=True)],
+            stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL, timeout=5,
+        )
+        return process.returncode == 0
+    except (OSError, subprocess.TimeoutExpired):
+        return False
+
+
+def check_updates(request):
+    private_state()
+    # Serialize all monitors and manual/background checks, including delivery
+    # bookkeeping, so the same release cannot produce duplicate notifications.
+    with (STATE / 'updates.lock').open('a') as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        state = load_update_state()
+        if request.get('action') == 'update_settings':
+            enabled = request.get('enabled')
+            if type(enabled) is not bool:
+                raise UserError('invalid_settings')
+            state['enabled'] = enabled
+            save_json(STATE / 'updates.json', state)
+            return {'updates': update_result(state, version())}
+        current = version() if installed() else ''
+        result = update_result(state, current)
+        force = request.get('force') is True
+        due = result['checkedAt'] == 0 or result['nextCheckSeconds'] <= 1
+        if not current or (not force and (not result['enabled'] or not due)):
+            return {'updates': result}
+        try:
+            state['latest'] = fetch_latest_release()
+            state.pop('error', None)
+        except Exception:
+            state['error'] = True
+        state['checkedAt'] = time.time()
+        result = update_result(state, current)
+        notified = state.get('notifiedVersions', [])
+        if not isinstance(notified, list):
+            notified = []
+        latest = state.get('latest', {})
+        should_notify = result['status'] == 'update_available' and latest['version'] not in notified
+        if should_notify:
+            # Reserve before sending. A process interruption after delivery
+            # must not cause the next shell startup to show the same popup.
+            state['notifiedVersions'] = notified + [latest['version']]
+        save_json(STATE / 'updates.json', state)
+        if should_notify and not notify_update(latest, request.get('language')):
+            state['notifiedVersions'] = notified
+            save_json(STATE / 'updates.json', state)
+        return {'updates': result}
+
 def main(req):
     action=req.get('action')
+    if action in ('check_updates', 'update_settings'): return check_updates(req)
     if action=='inspect': return inspect()
     if action=='choose_server': return choose_server(req)
     if action=='test_servers':

@@ -20,6 +20,11 @@ Ui.Panel {
   property var settingsData: []
   property var profilesData: []
   property var serversData: []
+  property var updateData: ({enabled: true, status: "updates_not_checked", latestVersion: "", installedVersion: ""})
+  property var updateRequest: ({})
+  property var queuedUpdateRequest: null
+  property string updateOutput: ""
+  readonly property bool updateBusy: updateWorker.running
   property bool connectionPending: false
   property var prefsBaseline: ({})
   property string section: "home"
@@ -34,6 +39,7 @@ Ui.Panel {
   property bool stopping: false
   property bool stoppedByPlugin: false
   property int stopTicks: 0
+  property bool installationAttempted: false
   readonly property bool busy: stopping || connectionPending || (worker.running && request.action !== "inspect")
   readonly property int changeCount: Object.keys(changes).length
   readonly property color foreground: Commons.Color.popups.text
@@ -54,6 +60,20 @@ Ui.Panel {
   }
   Language { id: strings }
   QsMenuOpener { id: nativeMenu; menu: root.trayItem ? root.trayItem.menu : null }
+
+  readonly property var serviceModes: Model.serviceModeEntries(modeMenu.children.values)
+  readonly property int serviceModeIndex: Model.selectedServiceMode(serviceModes)
+  QsMenuOpener {
+    id: modeMenu
+    menu: Model.menuAction(nativeMenu.children.values, "mode")
+  }
+  function selectServiceMode(index) {
+    if (busy || index === serviceModeIndex) return
+    var entry = serviceModes[index]
+    if (!entry || !entry.enabled) { showMessage("menu_not_ready", true); return }
+    entry.triggered()
+    refreshLater.restart()
+  }
 
   function t(key) { return strings.t(key) }
   function settingLabel(e) { return root.russian ? (e.label_ru || e.label_en || e.label) : (e.label_en || e.label) }
@@ -80,42 +100,67 @@ Ui.Panel {
     worker.running = true
   }
   function refresh() { if (!busy && !worker.running) run({action: "inspect"}) }
-  function hideApp() {
-    run({action: "hide_window"})
+  function runUpdateRequest(payload) {
+    if (updateWorker.running) {
+      queuedUpdateRequest = payload
+      return
+    }
+    updateRequest = payload
+    updateWorker.running = true
   }
-  function openApp(path) {
-    if (!appData.installed) { updateHiddify(); return }
-    if (path) Quickshell.execDetached(["hiddify", "hiddify:///" + path])
-    else run({action: "show_window"})
+  function checkUpdates(force) {
+    runUpdateRequest({action: "check_updates", force: !!force, language: strings.language})
   }
-  property string hiddifyUpdate: ""
-  function updateHiddify() {
-    showMessage("update_terminal", false)
-    updateTerminal.running = true
+  function setAutomaticUpdates(enabled) {
+    runUpdateRequest({action: "update_settings", enabled: enabled, language: strings.language})
+  }
+  function updateStatusText() {
+    if (updateData.status === "update_available") {
+      if (typeof updateData.prerelease === "boolean")
+        return t("update_available_kind").arg(updateData.latestVersion).arg(t(updateData.prerelease ? "prerelease" : "stable_release"))
+      return t("update_available").arg(updateData.latestVersion)
+    }
+    return t(updateData.status || "updates_not_checked")
+  }
+  function installUpdate() {
+    if (!updateTerminal.running) updateTerminal.running = true
   }
   Process {
     id: updateTerminal
     command: ["/usr/bin/xdg-terminal-exec", "--", "/usr/bin/bash", "-c",
-      'printf "Hiddify update\\n"; /usr/bin/python3 "$1"; printf "\\nPress Enter to close. "; read -r',
-      "hiddify-update", Qt.resolvedUrl("update_hiddify.py").toString().replace(/^file:\/\//, "")]
+      'python3 "$1" --language "$2"; result=$?; printf "\n%s" "$3"; read -r; exit "$result"',
+      "hiddify-update", Qt.resolvedUrl("update_hiddify.py").toString().replace(/^file:\/\//, ""),
+      strings.language, root.t("terminal_close")]
     onExited: function(exitCode) {
       if (exitCode !== 0) root.showMessage("update_terminal_failed", true)
       root.refresh()
     }
   }
-  Process {
-    id: updateCheck
-    command: ["python3", Qt.resolvedUrl("update_hiddify.py").toString().replace(/^file:\/\//, ""), "--check"]
-    stdout: StdioCollector {
-      onStreamFinished: root.hiddifyUpdate = /^\d+\.\d+\.\d+$/.test(text.trim()) ? text.trim() : ""
-    }
+  function minimizeApp() {
+    if (trayItem && !windowProbe.running) windowProbe.running = true
   }
-  Timer {
-    interval: 3600000
-    repeat: true
-    running: true
-    triggeredOnStart: true
-    onTriggered: updateCheck.running = true
+  Process {
+    id: windowProbe
+    command: ["python3", Qt.resolvedUrl("window-hiddify.py").toString().replace(/^file:\/\//, ""), "minimize"]
+  }
+  function openApp(path) {
+    if (!appData.installed) { install(); return }
+    Quickshell.execDetached(["python3", Qt.resolvedUrl("window-hiddify.py").toString().replace(/^file:\/\//, ""), "restore"])
+    if (path) Quickshell.execDetached(["hiddify", "hiddify:///" + path])
+    else if (trayItem && !trayItem.onlyMenu) trayItem.activate()
+    else Quickshell.execDetached(["hiddify"])
+  }
+  function install() {
+    if (installationAttempted || busy) return
+    installationAttempted = true
+    showMessage("installing", false)
+    Quickshell.execDetached(["omarchy", "launch", "terminal", "bash", Qt.resolvedUrl("install.sh").toString().replace(/^file:\/\//, "")])
+  }
+  function connectionButtonText() {
+    var keys = root.connected
+      ? ["stop_proxy", "stop_system_proxy", "stop_vpn", "stop_router"]
+      : ["start_proxy", "start_system_proxy", "start_vpn", "start_router"]
+    return t(keys[serviceModeIndex] || (root.connected ? "disconnect" : "connect"))
   }
   function toggleConnection() {
     if (!trayItem) { openApp(); showMessage("start_first", false); return }
@@ -165,8 +210,7 @@ Ui.Panel {
       for (var i = 0; i < result.settings.length; i++) b[result.settings[i].key] = result.settings[i].value
       // Do not replace the baseline while the user has unsaved changes.
       if (!changeCount) prefsBaseline = b
-    } else if (request.action === "hide_window" || request.action === "show_window") {
-      return
+      if (!result.installed && !installationAttempted) Qt.callLater(install)
     } else if (request.action === "validate_settings") {
       Qt.callLater(function() { root.offline({action: "save_settings", changes: root.changes, baseline: root.prefsBaseline}) })
     } else if (result.prepared) {
@@ -197,6 +241,43 @@ Ui.Panel {
       }
     }
   }
+  Process {
+    id: updateWorker
+    command: ["python3", Qt.resolvedUrl("backend.py").toString().replace(/^file:\/\//, "")]
+    stdinEnabled: true
+    onStarted: { root.updateOutput = ""; write(JSON.stringify(root.updateRequest) + "\n") }
+    stdout: StdioCollector {
+      waitForEnd: true
+      onStreamFinished: root.updateOutput = text
+    }
+    onExited: function(exitCode) {
+      try {
+        var result = JSON.parse(root.updateOutput)
+        if (result.ok && result.updates) {
+          root.updateData = result.updates
+          hourlyUpdateCheck.stop()
+          if (result.updates.enabled) {
+            hourlyUpdateCheck.interval = Math.max(1000, result.updates.nextCheckSeconds * 1000)
+            hourlyUpdateCheck.start()
+          }
+          if (root.updateRequest.action === "update_settings" && result.updates.enabled)
+            root.queuedUpdateRequest = {action: "check_updates", language: strings.language}
+        } else {
+          root.updateData = Object.assign({}, root.updateData, {status: "update_check_failed"})
+          if (root.updateData.enabled) { hourlyUpdateCheck.interval = 3600000; hourlyUpdateCheck.start() }
+        }
+      } catch (error) {
+        root.updateData = Object.assign({}, root.updateData, {status: "update_check_failed"})
+        if (root.updateData.enabled) { hourlyUpdateCheck.interval = 3600000; hourlyUpdateCheck.start() }
+      }
+      if (root.queuedUpdateRequest) {
+        var next = root.queuedUpdateRequest
+        root.queuedUpdateRequest = null
+        Qt.callLater(function() { root.runUpdateRequest(next) })
+      }
+    }
+  }
+  Timer { id: hourlyUpdateCheck; interval: 3600000; onTriggered: root.checkUpdates(false) }
   Timer {
     id: stopWait
     interval: 400
@@ -217,8 +298,8 @@ Ui.Panel {
   Timer { id: connectionTimeout; interval: 8000; onTriggered: root.connectionPending = false }
   Timer { id: refreshLater; interval: 2000; onTriggered: root.refresh() }
   Timer { interval: 5000; repeat: true; running: root.opened && !root.busy; onTriggered: root.refresh() }
-  Component.onCompleted: refresh()
-  onOpenedChanged: if (opened) refresh()
+  Component.onCompleted: { refresh(); checkUpdates(false) }
+  onOpenedChanged: if (opened) { refresh(); checkUpdates(false) }
 
   Ui.BarIconButton {
     id: button
@@ -230,7 +311,7 @@ Ui.Panel {
     tooltipText: Model.safeTooltip(root.t(root.connected ? "connected" : "disconnected") + "\n" + root.t("bar_actions"))
     iconComponent: root.trayItem ? appIcon : null
     onPressed: function(mouseButton) {
-      if (mouseButton === Qt.RightButton) root.hideApp()
+      if (mouseButton === Qt.RightButton) root.minimizeApp()
       else root.toggle()
     }
   }
@@ -251,39 +332,53 @@ Ui.Panel {
     owner: root
     bar: root.bar
     open: root.opened
-    contentWidth: panel.fittedContentWidth(Commons.Style.space(500))
-    contentHeight: panel.fittedContentHeight(Commons.Style.space(620), Commons.Style.space(700))
-    padding: Commons.Style.space(18)
+    contentWidth: panel.fittedContentWidth(Commons.Style.space(440))
+    readonly property real pageHeight: Commons.Style.space(root.section === "settings" ? 840 : root.section === "home" ? 530 : 520)
+    contentHeight: panel.fittedContentHeight(pageHeight)
     focusTarget: panel.loadedContent
     content: FocusScope {
       readonly property real settingsScroll: settingList.contentY
       anchors.fill: parent
-      implicitHeight: Commons.Style.space(620)
+      implicitHeight: panel.pageHeight
       Keys.onEscapePressed: root.close()
       ColumnLayout {
         anchors.fill: parent
-        spacing: Commons.Style.space(12)
+        spacing: Commons.Style.spacing.controlGap
         RowLayout {
           Layout.fillWidth: true
-          spacing: Commons.Style.space(12)
-          ColumnLayout {
+          spacing: Commons.Style.spacing.controlGap
+          Plain {
+            text: root.t("app_version").arg(root.appData.version || "")
+            font.pixelSize: Commons.Style.font.heading
+            font.bold: true
             Layout.fillWidth: true
-            Plain { text: "Hiddify"; font.pixelSize: Commons.Style.font.heading; font.bold: true }
-            Plain { text: root.appData.version + " · " + root.t(root.connected ? "connected" : "disconnected"); opacity: 0.7 }
           }
-          ActionButton { text: root.t("open_app"); onClicked: root.openApp() }
-          Item { Layout.preferredWidth: Commons.Style.space(4) }
-          Ui.ToggleSwitch {
-            id: connectionSwitch
-            Layout.alignment: Qt.AlignVCenter
-            checked: root.connected
-            busy: root.busy
-            interactive: !!root.trayItem
-            onToggled: root.toggleConnection()
+          Plain {
+            text: root.t(root.connected ? "status_on" : "status_off")
+            font.bold: true
+            opacity: root.connected ? 1 : 0.65
           }
         }
         RowLayout {
           Layout.fillWidth: true
+          spacing: Commons.Style.spacing.controlGap
+          ActionButton { text: root.t("open_app"); Layout.fillWidth: true; onClicked: root.openApp() }
+          ActionButton {
+            text: root.t("minimize_app")
+            Layout.fillWidth: true
+            enabled: !!root.trayItem && !windowProbe.running
+            onClicked: root.minimizeApp()
+          }
+          ActionButton {
+            text: root.t("update_plugin")
+            Layout.fillWidth: true
+            onClicked: Quickshell.execDetached(["omarchy", "launch", "terminal", "bash", "-c",
+              'omarchy plugin update msi.hiddify --yes; read -r'])
+          }
+        }
+        RowLayout {
+          Layout.fillWidth: true
+          spacing: Commons.Style.spacing.controlGap
           Repeater {
             model: ["home", "subscriptions", "servers", "settings"]
             ActionButton {
@@ -305,19 +400,9 @@ Ui.Panel {
         ColumnLayout {
           visible: !root.appData.installed
           Layout.fillWidth: true
+          spacing: Commons.Style.spacing.controlGap
           Plain { text: root.t("not_installed"); wrapMode: Text.Wrap; Layout.fillWidth: true }
-        }
-        Plain {
-          visible: root.appData.installed && !root.appData.compatible
-          Layout.fillWidth: true
-          wrapMode: Text.Wrap
-          text: root.t("unsupported_version")
-        }
-        ActionButton {
-          visible: root.section === "home"
-          Layout.fillWidth: true
-          text: root.t("update_hiddify") + (root.hiddifyUpdate ? " · " + root.hiddifyUpdate : "")
-          onClicked: root.updateHiddify()
+          ActionButton { text: root.t("retry_install"); onClicked: { root.installationAttempted = false; root.install() } }
         }
         QQC.ScrollView {
           Layout.fillWidth: true
@@ -327,12 +412,66 @@ Ui.Panel {
           contentWidth: availableWidth
           ColumnLayout {
             width: parent.width
-            spacing: Commons.Style.space(12)
-            Plain { text: root.t("dashboard_hint"); wrapMode: Text.Wrap; Layout.fillWidth: true }
-            ActionButton {
-              text: root.t("update_plugin")
-              onClicked: Quickshell.execDetached(["omarchy", "launch", "terminal", "bash", "-c",
-                'omarchy plugin update msi.hiddify --yes; read -r'])
+            spacing: Commons.Style.spacing.controlGap
+            ColumnLayout {
+              Layout.fillWidth: true
+              spacing: Commons.Style.spacing.controlGap
+              Plain { text: root.t("quick_settings"); font.bold: true }
+              RowLayout {
+                Layout.fillWidth: true
+                spacing: Commons.Style.spacing.controlGap
+                Ui.Dropdown {
+                  Layout.fillWidth: true
+                  showLabel: false
+                  options: ["mode_proxy", "mode_system_proxy", "mode_vpn", "mode_router"].map(function(key, index) {
+                    return {value:String(index), label:root.t(key)}
+                  })
+                  value: String(root.serviceModeIndex)
+                  enabled: !root.busy && root.serviceModes.length === 4
+                  onChanged: function(value) { root.selectServiceMode(Number(value)) }
+                }
+              }
+              ActionButton {
+                Layout.fillWidth: true
+                text: root.connectionButtonText()
+                enabled: !!root.trayItem && !root.busy
+                onClicked: root.toggleConnection()
+              }
+            }
+            ColumnLayout {
+              Layout.fillWidth: true
+              spacing: Commons.Style.spacing.controlGap
+              RowLayout {
+                Layout.fillWidth: true
+                spacing: Commons.Style.spacing.controlGap
+                Plain { text: root.t("hiddify_updates"); font.bold: true; Layout.fillWidth: true }
+                Plain { text: root.t("automatic_update_checks"); opacity: 0.7 }
+                Ui.ToggleSwitch {
+                  checked: root.updateData.enabled
+                  busy: root.updateBusy
+                  onToggled: root.setAutomaticUpdates(!checked)
+                }
+              }
+              Plain {
+                Layout.fillWidth: true
+                wrapMode: Text.Wrap
+                text: root.updateBusy && root.updateRequest.force ? root.t("checking_updates") : root.updateStatusText()
+              }
+              RowLayout {
+                Layout.fillWidth: true
+                spacing: Commons.Style.spacing.controlGap
+                ActionButton {
+                  text: root.t("check_updates")
+                  Layout.fillWidth: true
+                  enabled: !root.updateBusy
+                  onClicked: root.checkUpdates(true)
+                }
+                ActionButton {
+                  text: root.t("update_hiddify")
+                  Layout.fillWidth: true
+                  onClicked: root.installUpdate()
+                }
+              }
             }
             Plain { text: strings.tn("profiles_count", root.profilesData.length).arg(strings.number((root.profilesData).length)) }
             Repeater {
@@ -340,12 +479,14 @@ Ui.Panel {
               Rectangle {
                 required property var modelData
                 Layout.fillWidth: true
-                implicitHeight: profileColumn.implicitHeight + Commons.Style.space(20)
+                readonly property int padding: Commons.Style.spacing.xl
+                implicitHeight: profileColumn.implicitHeight + 2 * padding
                 radius: Commons.Style.space(6)
                 color: Qt.alpha(root.foreground, modelData.active ? 0.10 : 0.035)
                 ColumnLayout {
                   id: profileColumn
-                  anchors { left: parent.left; right: parent.right; top: parent.top; margins: Commons.Style.space(10) }
+                  anchors { left: parent.left; right: parent.right; top: parent.top; margins: parent.padding }
+                  spacing: Commons.Style.spacing.labelGap
                   Plain { text: (modelData.active ? "● " : "○ ") + modelData.name; Layout.fillWidth: true; elide: Text.ElideRight }
                   Plain { text: root.t(modelData.active ? "active_profile" : "available_profile"); opacity: 0.65 }
                   ActionButton {
@@ -367,13 +508,13 @@ Ui.Panel {
                 onClicked: root.openApp(modelData.path)
               }
             }
-            Plain { text: root.t("advanced_hint"); wrapMode: Text.Wrap; Layout.fillWidth: true; opacity: 0.65 }
           }
         }
         ColumnLayout {
           visible: root.section === "subscriptions"
           Layout.fillWidth: true
           Layout.fillHeight: true
+          spacing: Commons.Style.spacing.controlGap
           Ui.TextField { id: subscriptionName; Layout.fillWidth: true; placeholderText: root.t("subscription_name"); maximumLength: 128 }
           Ui.TextField {
             id: subscriptionUrl
@@ -396,12 +537,13 @@ Ui.Panel {
             contentWidth: availableWidth
             ColumnLayout {
               width: parent.width
-              spacing: Commons.Style.space(10)
+              spacing: Commons.Style.spacing.xl
               Repeater {
                 model: root.profilesData
                 ColumnLayout {
                   required property var modelData
                   Layout.fillWidth: true
+                  spacing: Commons.Style.spacing.labelGap
                   Plain { text: modelData.name; Layout.fillWidth: true; elide: Text.ElideRight; font.bold: true }
                   Plain { text: root.t("updated").arg(root.profileUpdated(modelData.last_update)); Layout.fillWidth: true; elide: Text.ElideRight; opacity: 0.6 }
                   ActionButton {
@@ -422,14 +564,14 @@ Ui.Panel {
           contentWidth: availableWidth
           ColumnLayout {
             width: parent.width
-            spacing: Commons.Style.space(16)
-            Plain { text: root.t("servers_hint"); wrapMode: Text.Wrap; Layout.fillWidth: true }
+            spacing: Commons.Style.spacing.xxl
             Plain { visible: !(root.serversData).length; text: root.t("api_unavailable"); wrapMode: Text.Wrap; Layout.fillWidth: true }
             Repeater {
               model: root.serversData
               ColumnLayout {
                 required property var modelData
                 Layout.fillWidth: true
+                spacing: Commons.Style.spacing.controlGap
                 Plain { text: modelData.name; wrapMode: Text.Wrap; Layout.fillWidth: true; font.bold: true }
                 Ui.Dropdown {
                   Layout.fillWidth: true
@@ -458,6 +600,7 @@ Ui.Panel {
           visible: root.section === "settings"
           Layout.fillWidth: true
           Layout.fillHeight: true
+          spacing: Commons.Style.spacing.controlGap
           Ui.TextField { Layout.fillWidth: true; placeholderText: root.t("search_settings"); onTextEdited: root.query = text }
           Ui.Dropdown {
             Layout.fillWidth: true
@@ -471,17 +614,22 @@ Ui.Panel {
             Layout.fillWidth: true
             Layout.fillHeight: true
             clip: true
-            spacing: Commons.Style.space(12)
+            spacing: Commons.Style.spacing.xxl
             model: root.settingsRows
             cacheBuffer: 250
-            QQC.ScrollBar.vertical: QQC.ScrollBar { policy: QQC.ScrollBar.AlwaysOn }
+            QQC.ScrollBar.vertical: QQC.ScrollBar {
+              id: settingsScrollbar
+              policy: QQC.ScrollBar.AlwaysOn
+            }
             delegate: ColumnLayout {
               id: settingRow
               required property var modelData
-              width: settingList.width - Commons.Style.space(12)
-              spacing: Commons.Style.space(4)
+              x: LayoutMirroring.enabled ? settingsScrollbar.width + Commons.Style.spacing.sm : 0
+              width: Math.max(0, settingList.width - settingsScrollbar.width - Commons.Style.spacing.sm)
+              spacing: Commons.Style.spacing.labelGap
               RowLayout {
                 Layout.fillWidth: true
+                spacing: Commons.Style.spacing.controlGap
                 Plain { text: root.settingLabel(settingRow.modelData); wrapMode: Text.Wrap; Layout.fillWidth: true }
                 Ui.ToggleSwitch {
                   visible: settingRow.modelData.type === "boolean"
@@ -522,6 +670,7 @@ Ui.Panel {
           Plain { text: root.t("save_hint"); wrapMode: Text.Wrap; Layout.fillWidth: true; opacity: 0.7 }
           RowLayout {
             Layout.fillWidth: true
+            spacing: Commons.Style.spacing.controlGap
             ActionButton {
               text: root.t("apply_count").arg(strings.number(root.changeCount))
               enabled: root.changeCount > 0 && !root.busy && root.appData.compatible
@@ -532,7 +681,7 @@ Ui.Panel {
           }
           ActionButton {
             text: root.t("restore_restart")
-            enabled: !root.busy && root.appData.hasBackup && root.appData.compatible
+            enabled: !root.busy && !!root.appData.hasBackup && root.appData.compatible
             Layout.fillWidth: true
             onClicked: root.offline({action: "restore"})
           }
@@ -558,12 +707,13 @@ Ui.Panel {
     target: "msi.hiddify"
     function open(): void { root.open() }
     function close(): void { root.close() }
+    function minimize(): void { root.minimizeApp() }
     function page(name: string): void {
       if (["home", "subscriptions", "servers", "settings"].indexOf(name) !== -1) { root.section = name; root.open() }
     }
     function toggle(): void { root.toggle() }
     function status(): string {
-      return JSON.stringify({language:strings.language,installed:root.appData.installed,version:root.appData.version,
+      return JSON.stringify({updates:root.updateData,serviceMode:root.serviceModeIndex,serviceModes:root.serviceModes.length,language:strings.language,installed:root.appData.installed,version:root.appData.version,
         compatible:root.appData.compatible,available:!!root.trayItem,connected:root.connected,
         menuReady:!!Model.menuAction(nativeMenu.children.values,"connection"),settings:(root.appData.settings || []).length,profiles:(root.profilesData).length,busy:root.busy,panelY:panel.cardOrigin.y,panelHeight:panel.contentHeight,scroll:panel.loadedContent ? panel.loadedContent.settingsScroll : 0})
     }

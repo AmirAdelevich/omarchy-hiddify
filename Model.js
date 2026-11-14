@@ -12,7 +12,7 @@ function isHiddify(id, title) {
 function menuAction(items, kind) {
   if (!items || items.length !== 6 || !items[1].isSeparator || !items[4].isSeparator
       || items[0].isSeparator || items[2].isSeparator || items[5].isSeparator) return null;
-  return kind === 'quit' ? items[5] : kind === 'connection' ? items[2] : null;
+  return kind === 'quit' ? items[5] : kind === 'connection' ? items[2] : kind === 'mode' && items[3].hasChildren ? items[3] : null;
 }
 function changedCopy(changes, key, value) {
   var result = Object.assign({}, changes); result[key] = value; return result;
@@ -37,4 +37,17 @@ function pluralForm(language, count) {
   if (a === 1 && b !== 11) return "one";
   if (a >= 2 && a <= 4 && !(b >= 12 && b <= 14)) return "few";
   return "many";
+}
+
+// Linux Hiddify exposes these four modes in ServiceMode.choices enum order.
+function serviceModeEntries(items) {
+  if (!items || items.length !== 4) return [];
+  for (var i = 0; i < items.length; i++)
+    if (items[i].isSeparator || items[i].hasChildren) return [];
+  return items;
+}
+function selectedServiceMode(items) {
+  for (var i = 0; i < items.length; i++)
+    if (items[i].checkState === 2) return i;
+  return -1;
 }

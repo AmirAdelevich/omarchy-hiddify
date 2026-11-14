@@ -17,8 +17,8 @@ jobs:
         with:
           go-version-file: corebridge/go.mod
           cache-dependency-path: corebridge/go.sum
-      - run: python -W error::ResourceWarning -m unittest discover -s . -p test_backend.py
+      - run: python -W error::ResourceWarning -m unittest discover -s . -p 'test_*.py'
       - run: node test.cjs
       - run: go test ./...
         working-directory: corebridge
-      - run: bash -n install.sh
+      - run: bash -n install.sh update-hiddify.sh

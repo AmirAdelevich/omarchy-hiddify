@@ -51,3 +51,26 @@ for(const setting of settings) {
  }
 }
 console.log('System language precedence, plural forms and all 91 bilingual settings passed');
+
+const modeItems = Array.from({length:4}, (_,i) => ({isSeparator:false,hasChildren:false,checkState:i===2?2:0}));
+assert.equal(model.serviceModeEntries(modeItems).length,4);
+assert.equal(model.selectedServiceMode(modeItems),2);
+assert.equal(model.serviceModeEntries(modeItems.slice(1)).length,0);
+assert.equal(model.serviceModeEntries([{isSeparator:true},...modeItems.slice(1)]).length,0);
+assert.equal(model.selectedServiceMode([]),-1);
+const modeMenuItems = Array.from({length:6},(_,i)=>({isSeparator:i===1||i===4,hasChildren:i===3}));
+assert.equal(model.menuAction(modeMenuItems,'mode'),modeMenuItems[3]);
+assert.equal(model.menuAction(items,'mode'),null);
+
+for (const key of Object.keys(en)) {
+  assert(!/[А-Яа-яЁё]/.test(JSON.stringify(en[key])), key);
+  if (typeof en[key] !== 'string') continue;
+  assert.deepEqual(
+    (JSON.stringify(en[key]).match(/%[0-9]+/g) || []).sort(),
+    (JSON.stringify(ru[key]).match(/%[0-9]+/g) || []).sort(),
+    key
+  );
+}
+for (const key of ['quick_settings','mode_proxy','mode_system_proxy','mode_vpn','mode_router',
+                   'stable_release','prerelease','update_available_kind','installer_current','installer_updating'])
+  assert(typeof en[key] === 'string' && typeof ru[key] === 'string',key);

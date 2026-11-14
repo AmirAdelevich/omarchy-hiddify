@@ -1,107 +1,106 @@
-"""Discover and package official Linux builds of Hiddify for Arch."""
-import hashlib
-import json
+#!/usr/bin/env python3
+"""Install a verified official AppImage as an Arch package in a visible terminal."""
+import argparse
 import pathlib
 import re
 import shutil
 import subprocess
-import sys
 import tempfile
-import urllib.request
 
 import backend
 
-API = 'https://api.github.com/repos/hiddify/hiddify-app/releases?per_page=30'
-ASSETS = {'x86_64': 'x64', 'aarch64': 'arm64'}
 
-
-def release():
-    asset_name = f'Hiddify-Linux-{ASSETS[backend.os.uname().machine]}.AppImage'
-    with urllib.request.urlopen(API, timeout=8) as response:
-        releases = json.load(response)
-    for item in releases:
-        tag = item['tag_name']
-        if item['draft'] or not re.fullmatch(r'v[0-9]+\.[0-9]+\.[0-9]+', tag):
-            continue
-        for asset in item['assets']:
-            digest = asset.get('digest') or ''
-            if asset['name'] == asset_name and re.fullmatch(r'sha256:[a-f0-9]{64}', digest):
-                return tag[1:], asset_name, digest[7:]
-    raise RuntimeError('No verified Linux build found')
-
-
-def available():
-    version, name, digest = release()
-    current = backend.version()
-    if current and subprocess.check_output(['vercmp', version, current], text=True).strip() != '1':
-        return None
-    return version, name, digest
-
-
-def install(build):
-    version, name, digest = build
-    package = 'hiddify-app-bin'
-    path = backend.executable()
-    if path:
-        owner = subprocess.check_output(['pacman', '-Qoq', path], text=True).strip()
-        if owner not in ('hiddify', 'hiddify-app-bin', 'hiddify-bin', 'hiddify-next-bin'):
-            raise RuntimeError(f'Unsupported Hiddify package: {owner}')
-        package = owner
-    if backend.running():
-        raise RuntimeError('Quit Hiddify from its tray menu, then retry.')
-    mode_key = 'flutter.service-mode'
-    saved_mode = backend.read_json(backend.PREFS, {}).get(mode_key)
-    if saved_mode in ('vpn', 'proxy', 'system-proxy', 'router'):
-        print(f'Keeping Hiddify mode: {saved_mode}', flush=True)
-    url = f'https://github.com/hiddify/hiddify-app/releases/download/v{version}/{name}'
-    with tempfile.TemporaryDirectory(prefix='hiddify-update-') as directory:
-        root = pathlib.Path(directory)
-        image = root / name
-        with urllib.request.urlopen(url, timeout=30) as response, image.open('wb') as output:
-            shutil.copyfileobj(response, output)
-        with image.open('rb') as source:
-            if hashlib.file_digest(source, 'sha256').hexdigest() != digest:
-                raise RuntimeError('Hiddify download checksum mismatch')
-        image.chmod(0o755)
-        subprocess.run([image, '--appimage-extract'], cwd=root, check=True, stdout=subprocess.DEVNULL)
-        (root / 'launcher').write_text('#!/bin/sh\nexec /opt/hiddify/Hiddify.AppImage "$@"\n')
-        (root / 'PKGBUILD').write_text(f"""pkgname={package}
+def package_recipe(release, machine, package='hiddify'):
+    if package not in ('hiddify', 'hiddify-app-bin', 'hiddify-bin', 'hiddify-next-bin'):
+        raise ValueError('Unsupported Hiddify package')
+    architecture = {'x86_64': 'x64', 'aarch64': 'arm64'}.get(machine)
+    if architecture is None:
+        raise ValueError('Unsupported architecture')
+    version = release['version']
+    backend.release_version(version)
+    filename = f'Hiddify-Linux-{architecture}.AppImage'
+    url = f'https://github.com/hiddify/hiddify-app/releases/download/v{version}/{filename}'
+    assets = release.get('assets')
+    if not isinstance(assets, list):
+        raise ValueError('Missing release assets')
+    asset = next((item for item in assets if isinstance(item, dict) and item.get('name') == filename), {})
+    digest = asset.get('digest', '')
+    if asset.get('browser_download_url') != url or not isinstance(digest, str) or not re.fullmatch(r'sha256:[a-f0-9]{64}', digest):
+        raise ValueError('Missing verified official download')
+    return f"""pkgname={package}
 pkgver={version}
 pkgrel=1
 pkgdesc='Hiddify proxy client'
-arch=('{backend.os.uname().machine}')
+arch=('{machine}')
 url='https://github.com/hiddify/hiddify-app'
-depends=('gtk3' 'jq' 'hicolor-icon-theme')
-options=('!strip' '!debug')
+license=('GPL-3.0-only')
+depends=('fuse3' 'gtk3' 'libayatana-appindicator')
+options=('!strip')
+source=('{url}')
+sha256sums=('{digest.removeprefix('sha256:')}')
+
 package() {{
-    install -Dm755 "$startdir/{name}" "$pkgdir/opt/hiddify/Hiddify.AppImage"
-    install -Dm755 "$startdir/launcher" "$pkgdir/usr/bin/hiddify"
-    sed 's|^Exec=.*|Exec=/usr/bin/hiddify %U|' "$startdir/squashfs-root/hiddify.desktop" > "$startdir/hiddify.desktop"
+    install -Dm755 "$srcdir/{filename}" "$pkgdir/opt/hiddify/Hiddify.AppImage"
+    install -Dm755 "$startdir/hiddify" "$pkgdir/usr/bin/hiddify"
     install -Dm644 "$startdir/hiddify.desktop" "$pkgdir/usr/share/applications/hiddify.desktop"
-    install -Dm644 "$startdir/squashfs-root/hiddify.png" "$pkgdir/usr/share/icons/hicolor/256x256/apps/hiddify.png"
+    if [[ -f "$startdir/hiddify.png" ]]; then
+        install -Dm644 "$startdir/hiddify.png" "$pkgdir/usr/share/icons/hicolor/256x256/apps/hiddify.png"
+    fi
 }}
-""")
-        env = dict(backend.os.environ, PKGDEST=directory)
-        subprocess.run(['makepkg', '--noconfirm'], cwd=root, env=env, check=True)
-        artifact, = root.glob('*.pkg.tar.*')
-        if backend.running():
-            raise RuntimeError('Quit Hiddify from its tray menu, then retry.')
-        subprocess.run(['sudo', 'pacman', '-U', str(artifact)], check=True)
-    if saved_mode in ('vpn', 'proxy', 'system-proxy', 'router') and not backend.running():
-        prefs = backend.read_json(backend.PREFS, {})
-        if prefs.get(mode_key) != saved_mode:
-            prefs[mode_key] = saved_mode
-            backend.save_json(backend.PREFS, prefs)
+"""
+
+
+def main(language='en', check=False):
+    strings = backend.read_json(backend.ROOT / 'i18n' / (language + '.json'), {})
+
+    if not shutil.which('makepkg'):
+        raise RuntimeError('makepkg is required')
+    release = backend.fetch_latest_release()
+    if backend.installed() and backend.installed_release_version(backend.version()) >= backend.release_version(release['version']):
+        print('' if check else strings['installer_current'])
+        return
+    if check:
+        print(release['version'])
+        return
+    if backend.running():
+        raise RuntimeError(strings['close_app_first'])
+    package = 'hiddify-app-bin'
+    if backend.installed():
+        package = subprocess.check_output(['pacman', '-Qoq', backend.executable()], text=True).strip()
+    machine = subprocess.check_output(['uname', '-m'], text=True).strip()
+    recipe = package_recipe(release, machine, package)
+    kind = strings['prerelease' if release.get('prerelease') else 'stable_release']
+    print(strings['installer_updating'].replace('%1', release['version']).replace('%2', kind), flush=True)
+    with tempfile.TemporaryDirectory(prefix='hiddify-update-') as directory:
+        work = pathlib.Path(directory)
+        (work / 'PKGBUILD').write_text(recipe)
+        (work / 'hiddify').write_text('#!/bin/sh\nexec /opt/hiddify/Hiddify.AppImage "$@"\n')
+        (work / 'hiddify.desktop').write_text(
+            '[Desktop Entry]\nType=Application\nName=Hiddify\nExec=hiddify %U\n'
+            'Icon=hiddify\nTerminal=false\nCategories=Network;\n'
+            'MimeType=x-scheme-handler/hiddify;\n')
+        icon = pathlib.Path('/usr/share/icons/hicolor/256x256/apps/hiddify.png')
+        if icon.is_file():
+            shutil.copy2(icon, work / 'hiddify.png')
+        backend.private_state()
+        with (backend.STATE / 'write.lock').open('a') as lock:
+            backend.fcntl.flock(lock, backend.fcntl.LOCK_EX)
+            if backend.running():
+                raise RuntimeError(strings['close_app_first'])
+            mode_key = 'flutter.service-mode'
+            saved_mode = backend.read_json(backend.PREFS, {}).get(mode_key)
+            subprocess.run(['makepkg', '-si'], cwd=work, check=True,
+                           env=dict(backend.os.environ, PKGDEST=directory))
+            if saved_mode in ('vpn', 'proxy', 'system-proxy', 'router') and not backend.running():
+                prefs = backend.read_json(backend.PREFS, {})
+                if prefs.get(mode_key) != saved_mode:
+                    prefs[mode_key] = saved_mode
+                    backend.save_json(backend.PREFS, prefs)
 
 
 if __name__ == '__main__':
-    try:
-        build = available()
-        if sys.argv[1:] == ['--check']:
-            print(build[0] if build else '')
-        elif build:
-            install(build)
-        else:
-            print('Hiddify is up to date.')
-    except (OSError, ValueError, KeyError, RuntimeError, subprocess.SubprocessError) as error:
-        sys.exit(str(error))
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--language', choices=('en', 'ru'), default='en')
+    parser.add_argument('--check', action='store_true')
+    arguments = parser.parse_args()
+    main(arguments.language, arguments.check)

@@ -8,7 +8,8 @@ A Hiddify control panel for the Omarchy Quickshell bar. Connect or disconnect, i
 
 ## Features
 
-- Live connection switch and tray status.
+- Explicit connection action and live status, with Proxy, System proxy, VPN and Router quick modes.
+- Compact overview, expanded settings, and Open app / Minimize actions.
 - HTTPS subscription import and refresh, validated by the installed Hiddify CLI.
 - Active-profile selection, server selection and latency tests.
 - Searchable settings for DNS, TUN, ports, routing, TLS fragmentation, WARP, Psiphon and the app.
@@ -16,6 +17,7 @@ A Hiddify control panel for the Omarchy Quickshell bar. Connect or disconnect, i
 - Russian and English labels, options, plural forms, numbers and dates.
 - Automatic Hiddify installation when missing, using Omarchy's package manager in a visible terminal.
 - Quiet background refresh: stable controls and preserved settings scroll position.
+- Hourly release checks, one notification per new Hiddify version and a manual check/update action.
 
 ## Install
 
@@ -35,6 +37,8 @@ Select **Update extension** on the panel’s Home tab. On devices with an older 
 omarchy plugin update msi.hiddify --yes
 ```
 
+The Minimize action moves Hiddify windows to a dedicated hidden Hyprland workspace. Open app returns them to the current workspace.
+
 ## Language
 
 The plugin follows the live language selected in **Omarchy Setup → Language**. If no Omarchy language has been selected, it uses `LC_ALL`, `LC_MESSAGES`, `LANGUAGE`, then `LANG`. Russian locales select Russian; English and other locales use English. No shell restart is required when changing the Omarchy language.
@@ -51,11 +55,11 @@ Advanced routing rules, full logs and system autostart are accessed through the 
 
 ## Network, credentials and dependencies
 
-Runtime dependencies: Omarchy Quickshell and its `qs.Ui`/`qs.Commons` components, Python 3 standard library, Hiddify and its HiddifyCli, and the usual Omarchy package-management tools. The Go bridge is included with source and pinned build dependencies in `corebridge/go.mod` and `corebridge/go.sum`.
+Runtime dependencies: Omarchy Quickshell and its `qs.Ui`/`qs.Commons` components, Python 3 standard library, Hiddify and its HiddifyCli, Hyprland’s hyprctl, makepkg, and the usual Omarchy package-management tools. The Go bridge is included with source and pinned build dependencies in `corebridge/go.mod` and `corebridge/go.sum`.
 
-External requests occur on installation, explicit subscription import/refresh, or explicit latency tests. HTTPS subscriptions are limited to 8 MB; HTTP redirects are refused and download/parser timeouts are applied. Hiddify performs latency checks through its configured test destination. Local state is refreshed every five seconds while the panel is open.
+External requests occur on installation, explicit subscription import/refresh, or explicit latency tests. HTTPS subscriptions are limited to 8 MB; HTTP redirects are refused and download/parser timeouts are applied. Hiddify performs latency checks through its configured test destination. Local state is refreshed every five seconds while the panel is open. Automatic update checks query the fixed HTTPS endpoint `api.github.com/repos/hiddify/hiddify-app/releases?per_page=20` once an hour, including while the panel is closed. Disable these checks with the Hourly switch in Overview. The latest version and notification history are kept privately in `updates.json` under the plugin state directory. Each new version produces one popup across monitors and restarts. When current, the panel displays that no updates are available. Checks include numbered pre-releases. The version label identifies releases and pre-releases. Quit Hiddify before updating. The installer preserves the installed package name and selected connection mode. The Update button builds and installs an Arch package from the official AppImage in a terminal, checking the SHA-256 supplied by GitHub.
 
-Server controls use Hiddify's local background core at `127.0.0.1:18020` and its existing `/var/lib/hiddify-admin-bgservice/control.secret`. This credential is read locally, never logged or uploaded. A local Clash API is used as a fallback if its token is available. Credentials are never forwarded through an HTTP proxy or redirect. The native server page remains available when neither API can be used.
+Server controls use Hiddify's local background core at `127.0.0.1:18020` and its existing `/var/lib/hiddify-admin-bgservice/control.secret`. This credential is read locally, never logged or uploaded. Before gRPC can send its authorization metadata, the custom dialer checks the kernel UID of the exact established reverse TCP tuple in `/proc/net/tcp`. Only a root-owned peer is accepted. Every new connection, including reconnects, passes this check. The connection is closed on missing or untrusted ownership information. Root and the current user are trusted local identities. A local Clash API is used as a fallback if its token is available, with the same connected-socket ownership check accepting root or the current user before HTTP headers are written. Credentials are never forwarded through an HTTP proxy or redirect. The native server page remains available when neither API can be used.
 
 Hiddify data is under `$XDG_DATA_HOME/app.hiddify.com/` (default `~/.local/share/app.hiddify.com/`). Private backups and staged imports are under `$XDG_STATE_HOME/omarchy-hiddify/` (default `~/.local/state/omarchy-hiddify/`), with private directory/file permissions. Subscription URLs are sent to the adapter on stdin, not process arguments.
 
@@ -73,6 +77,7 @@ Removing the plugin preserves Hiddify, its subscriptions/settings and the backup
 ```bash
 omarchy-shell msi.hiddify open
 omarchy-shell msi.hiddify close
+omarchy-shell msi.hiddify minimize
 omarchy-shell msi.hiddify page subscriptions
 omarchy-shell msi.hiddify page settings
 omarchy-shell msi.hiddify page servers
@@ -82,7 +87,7 @@ omarchy-shell msi.hiddify status
 ## Build and test
 
 ```bash
-python -m unittest discover -s . -p test_backend.py
+python -m unittest discover -s . -p 'test_*.py'
 node test.cjs
 (cd corebridge && go test ./... && go build -trimpath -ldflags='-s -w' -o ../corebridge-bin .)
 omarchy plugin validate .
@@ -94,4 +99,4 @@ Go 1.27.3 or later is required to rebuild the bridge. Write/import tests use tem
 
 Plugin code: [MIT](LICENSE). Go dependency licenses are in [licenses/](licenses/). This is an independent integration for [Hiddify](https://github.com/hiddify/hiddify-app) and [Omarchy](https://github.com/omacom/omarchy), not an official Hiddify or Omarchy release.
 
-Preference keys and supported values were checked against Hiddify app v5.5.5; local gRPC message fields follow hiddify-core's `v2/hcore/hcore.proto`. The adapter and its labels are implemented in this repository. No Hiddify application or core source is compiled into the bridge: the bridge uses the local protocol to communicate with the separately installed application. The supplied preview is a screenshot of this plugin.
+Preference keys and supported values were checked against Hiddify app v5.5.5; local gRPC message fields follow hiddify-core's `v2/hcore/hcore.proto`. The adapter and its labels are implemented in this repository. No Hiddify application or core source is compiled into the bridge: the bridge uses the local protocol to communicate with the separately installed application. The supplied preview is an English promotional composition based on a screenshot of this plugin, with an example profile.
