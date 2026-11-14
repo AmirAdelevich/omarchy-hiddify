@@ -93,11 +93,11 @@ omarchy-shell msi.hiddify status
 ```bash
 python -m unittest discover -s . -p 'test_*.py'
 node test.cjs
-(cd corebridge && go test -race ./... && CGO_ENABLED=0 GOEXPERIMENT=nodwarf5 go build -buildvcs=false -trimpath -ldflags='-s -w' -o ../corebridge-bin .)
+(cd corebridge && go test -race ./... && CGO_ENABLED=0 GOEXPERIMENT= go build -buildvcs=false -trimpath -ldflags='-s -w' -o ../corebridge-bin .)
 omarchy plugin validate .
 ```
 
-Go 1.27.3 or later is required to rebuild the bridge. Write/import tests use temporary databases and fixtures and never change the real VPN connection. Package installation is tested with stub commands.
+Go 1.27.4 or later is required to rebuild the bridge. Write/import tests use temporary databases and fixtures and never change the real VPN connection. Package installation is tested with stub commands.
 
 ## License and attribution
 
