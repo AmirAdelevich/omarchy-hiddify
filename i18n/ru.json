@@ -54,7 +54,7 @@
   "update_notification_body": "Hiddify %1 · %2. Откройте виджет для обновления.",
   "connected": "Hiddify — подключён",
   "disconnected": "Hiddify — отключён",
-  "bar_actions": "ЛКМ: панель · ПКМ: свернуть Hiddify",
+  "bar_actions": "ЛКМ: панель · ПКМ: включить/выключить подключение",
   "open_app": "Приложение",
   "connect": "Подключить",
   "disconnect": "Отключить",

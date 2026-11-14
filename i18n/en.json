@@ -54,7 +54,7 @@
   "update_notification_body": "Hiddify %1 · %2. Open the widget to update.",
   "connected": "Hiddify — connected",
   "disconnected": "Hiddify — disconnected",
-  "bar_actions": "Left: panel · Right: minimize Hiddify",
+  "bar_actions": "Left: panel · Right: connect/disconnect",
   "open_app": "Open app",
   "connect": "Connect",
   "disconnect": "Disconnect",

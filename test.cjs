@@ -80,3 +80,7 @@ for (const [text, expected] of [["Disconnect","on"],["Отключить","on"],
 assert.equal(model.connectionState(null),"unknown");
 for (const state of ["on","off","unknown","starting","stopping","reloading"])
   for (const catalog of [en,ru]) assert(typeof catalog["status_"+state] === "string");
+
+assert(source.includes('if (mouseButton === Qt.RightButton) root.toggleConnection()'));
+assert(!source.includes('if (mouseButton === Qt.RightButton) root.minimizeApp()'));
+assert(source.includes('function toggleConnection() {\n    if (busy) return'));

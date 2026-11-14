@@ -169,6 +169,7 @@ Ui.Panel {
     return t(keys[serviceModeIndex] || (root.connected ? "disconnect" : "connect"))
   }
   function toggleConnection() {
+    if (busy) return
     if (!trayItem) { openApp(); showMessage("start_first", false); return }
     var entry = Model.menuAction(nativeMenu.children.values, "connection")
     if (!entry || !entry.enabled) { showMessage("menu_not_ready", true); return }
@@ -317,7 +318,7 @@ Ui.Panel {
     tooltipText: Model.safeTooltip(root.t(root.connected ? "connected" : "disconnected") + "\n" + root.t("bar_actions"))
     iconComponent: root.trayItem ? appIcon : null
     onPressed: function(mouseButton) {
-      if (mouseButton === Qt.RightButton) root.minimizeApp()
+      if (mouseButton === Qt.RightButton) root.toggleConnection()
       else root.toggle()
     }
   }

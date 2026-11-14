@@ -27,7 +27,7 @@ Requires Omarchy Quattro, Python 3 and a supported Hiddify version for native se
 omarchy plugin add https://github.com/AmirAdelevich/omarchy-hiddify --enable
 ```
 
-The plugin ID is `msi.hiddify`. Left-click its bar icon to open the panel; right-click to hide the Hiddify window. Use Open app to restore it and the panel switch to toggle the connection. First installation and updates use the same official GitHub AppImage and verified Arch-package build. Enter any requested password in the installer terminal.
+The plugin ID is `msi.hiddify`. Left-click its bar icon to open the panel; right-click to connect or disconnect in the selected mode. The Minimize button hides the Hiddify window, and Open app restores it. First installation and updates use the same official GitHub AppImage and verified Arch-package build. Enter any requested password in the installer terminal.
 
 ## Update
 

@@ -55,7 +55,7 @@ rows={
  'update_notification_body':('Hiddify %1 · %2. Open the widget to update.','Hiddify %1 · %2. Откройте виджет для обновления.'),
 'connected':('Hiddify — connected','Hiddify — подключён'),
 'disconnected':('Hiddify — disconnected','Hiddify — отключён'),
-'bar_actions':('Left: panel · Right: minimize Hiddify','ЛКМ: панель · ПКМ: свернуть Hiddify'),
+'bar_actions':('Left: panel · Right: connect/disconnect','ЛКМ: панель · ПКМ: включить/выключить подключение'),
 'open_app':('Open app','Приложение'),'connect':('Connect','Подключить'),'disconnect':('Disconnect','Отключить'),
 'home':('Overview','Обзор'),'subscriptions':('Subscriptions','Подписки'),'settings':('Settings','Настройки'),
 'working':('Working…','Выполняется…'),'restarting':('Closing Hiddify safely, applying changes and restarting…','Закрываю Hiddify, применяю изменения и запускаю снова…'),
