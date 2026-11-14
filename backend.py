@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Hiddify 5.5.5 adapter. JSON requests arrive on stdin, never in argv/logs."""
+"""Hiddify preferences and profile adapter. JSON requests arrive on stdin, never in argv/logs."""
 import base64, contextlib, datetime as dt, fcntl, hashlib, json, os, pathlib, re
 import shutil, sqlite3, subprocess, sys, tempfile, time, urllib.parse, urllib.request, uuid
 from local_peer import AuthenticatedHTTPConnection
@@ -32,8 +32,17 @@ def atomic(path, data):
         with os.fdopen(fd, 'wb') as out:
             out.write(data); out.flush(); os.fsync(out.fileno())
         os.replace(name, path)
+        sync_directory(path.parent)
     finally:
         if os.path.exists(name): os.unlink(name)
+
+def sync_directory(path):
+    descriptor = os.open(path, os.O_RDONLY | os.O_DIRECTORY)
+    try:
+        os.fsync(descriptor)
+    finally:
+        os.close(descriptor)
+
 
 def save_json(path, data):
     atomic(path, (json.dumps(data, ensure_ascii=False, indent=2)+'\n').encode())
@@ -58,7 +67,23 @@ def version():
                              capture_output=True, text=True, timeout=5)
     return package.stdout.strip().split(' ', 1)[-1] if package.returncode == 0 else ''
 
-def compatible(): return version().split('-',1)[0] == CATALOG['hiddifyVersion']
+def compatible():
+    try:
+        current = version().split(':')[-1].rsplit('-', 1)[0]
+        if current not in CATALOG.get('supportedVersions', [CATALOG['hiddifyVersion']]):
+            return False
+        if not (DATA / 'db.sqlite').exists():
+            return True
+        with dbconnect('file:' + str(DATA / 'db.sqlite') + '?mode=ro', uri=True) as db:
+            schema = db.execute('PRAGMA user_version').fetchone()[0]
+            columns = {row[1] for row in db.execute('PRAGMA table_info(profile_entries)')}
+        return schema in CATALOG.get('databaseVersions', [7]) and PROFILE_COLUMNS <= columns
+    except (OSError, sqlite3.Error):
+        return False
+
+
+PROFILE_COLUMNS = {'id', 'type', 'active', 'name', 'url', 'last_update', 'update_interval',
+                   'upload', 'download', 'total', 'expire', 'populated_headers', 'pinned'}
 
 def running():
     # The GUI alone owns shared_preferences.json. Never write while it is alive.
@@ -87,14 +112,141 @@ def window_action(show):
 
 
 def snapshot():
-    private_state(); folder=STATE/'backups'/(dt.datetime.now().strftime('%Y%m%d-%H%M%S-')+uuid.uuid4().hex[:8])
-    folder.mkdir(parents=True,mode=0o700)
-    if PREFS.exists(): atomic(folder/'shared_preferences.json',PREFS.read_bytes())
-    if (DATA/'db.sqlite').exists():
-        with dbconnect(DATA/'db.sqlite') as source, dbconnect(folder/'db.sqlite') as dest:
+    if running():
+        raise UserError('close_app_first')
+    private_state()
+    name = dt.datetime.now().strftime('%Y%m%d-%H%M%S-%f-') + uuid.uuid4().hex[:8]
+    final = STATE / 'backups' / name
+    folder = final.with_name('.' + name)
+    folder.mkdir(parents=True, mode=0o700)
+    try:
+        if PREFS.exists():
+            atomic(folder / 'shared_preferences.json', PREFS.read_bytes())
+        database = DATA / 'db.sqlite'
+        if database.exists():
+            with dbconnect(database) as source, dbconnect(folder / 'db.sqlite') as dest:
+                source.backup(dest)
+            (folder / 'db.sqlite').chmod(0o600)
+        configs = []
+        for config in sorted((DATA / 'configs').glob('*.json')):
+            atomic(folder / 'configs' / config.name, config.read_bytes())
+            configs.append(config.name)
+        save_json(folder / 'snapshot.json', {'schemaVersion': 1, 'configs': configs,
+                                          'preferences': PREFS.exists(), 'database': database.exists()})
+        if running():
+            raise UserError('close_app_first')
+        os.replace(folder, final)
+        sync_directory(final.parent)
+        return final
+    except Exception:
+        shutil.rmtree(folder, ignore_errors=True)
+        raise
+
+
+def restore_snapshot(folder):
+    manifest = read_json(folder / 'snapshot.json')
+    if manifest is None:
+        restore_legacy_snapshot(folder)
+        return
+    names = manifest.get('configs')
+    if manifest.get('schemaVersion') != 1 or not isinstance(names, list):
+        raise UserError('invalid_backup')
+    for name in names:
+        if not isinstance(name, str) or pathlib.Path(name).name != name or not name.endswith('.json'):
+            raise UserError('invalid_backup')
+        if not (folder / 'configs' / name).is_file():
+            raise UserError('invalid_backup')
+    for filename, present in [('shared_preferences.json', manifest.get('preferences')),
+                              ('db.sqlite', manifest.get('database'))]:
+        if type(present) is not bool or (present and not (folder / filename).is_file()):
+            raise UserError('invalid_backup')
+    # Validate before touching the destination. The SQLite backup API preserves
+    # consistency for databases using WAL.
+    if manifest['database']:
+        with dbconnect('file:' + str(folder / 'db.sqlite') + '?mode=ro', uri=True) as source:
+            if source.execute('PRAGMA quick_check').fetchone()[0] != 'ok':
+                raise UserError('invalid_backup')
+    for name in names:
+        atomic(DATA / 'configs' / name, (folder / 'configs' / name).read_bytes())
+    for config in (DATA / 'configs').glob('*.json'):
+        if config.name not in names:
+            config.unlink()
+    if (DATA / 'configs').is_dir():
+        sync_directory(DATA / 'configs')
+    if manifest['preferences']:
+        atomic(PREFS, (folder / 'shared_preferences.json').read_bytes())
+    else:
+        PREFS.unlink(missing_ok=True)
+    if manifest['database']:
+        with dbconnect('file:' + str(folder / 'db.sqlite') + '?mode=ro', uri=True) as source, dbconnect(DATA / 'db.sqlite') as dest:
             source.backup(dest)
-        (folder/'db.sqlite').chmod(0o600)
-    return folder
+    else:
+        for suffix in ('', '-wal', '-shm'):
+            (DATA / ('db.sqlite' + suffix)).unlink(missing_ok=True)
+
+
+def restore_legacy_snapshot(folder):
+    operation = read_json(folder / 'operation.json', {})
+    if operation.get('profile'):
+        pid = valid_id(operation['profile'])
+        config = folder / (pid + '.json')
+        if operation.get('hadConfig') and not config.is_file():
+            raise UserError('invalid_backup')
+    for filename in ('shared_preferences.json', 'db.sqlite'):
+        source = folder / filename
+        if not source.exists():
+            continue
+        if filename == 'db.sqlite':
+            with dbconnect('file:' + str(source) + '?mode=ro', uri=True) as src, dbconnect(DATA / filename) as dest:
+                src.backup(dest)
+        else:
+            atomic(PREFS, source.read_bytes())
+    if operation.get('profile'):
+        destination = DATA / 'configs' / (pid + '.json')
+        if operation.get('hadConfig'):
+            atomic(destination, config.read_bytes())
+        else:
+            destination.unlink(missing_ok=True)
+
+
+def recover_pending_write():
+    pending = read_json(STATE / 'pending-write.json')
+    if pending is None:
+        return
+    if running():
+        raise UserError('recovery_close_app')
+    name = pending.get('backup', '') if isinstance(pending, dict) else ''
+    if not re.fullmatch(r'[0-9]{8}-[0-9]{6}-(?:[0-9]{6}-)?[a-f0-9]{8}', name):
+        raise UserError('invalid_backup')
+    restore_snapshot(STATE / 'backups' / name)
+    (STATE / 'pending-write.json').unlink()
+    sync_directory(STATE)
+
+
+def perform_write(action, req):
+    recover_pending_write()
+    require_offline()
+    backup = snapshot()
+    require_offline()
+    save_json(STATE / 'pending-write.json', {'backup': backup.name})
+    try:
+        result = {'save_settings': lambda: write_settings(req, backup),
+                  'commit_import': lambda: commit_import(req, backup),
+                  'select_profile': lambda: select_profile(req, backup),
+                  'restore': lambda: restore(backup)}[action]()
+        if running():
+            raise UserError('recovery_close_app')
+    except Exception:
+        if running():
+            raise UserError('recovery_close_app') from None
+        restore_snapshot(backup)
+        (STATE / 'pending-write.json').unlink()
+        sync_directory(STATE)
+        raise
+    (STATE / 'pending-write.json').unlink()
+    sync_directory(STATE)
+    return result
+
 
 def profiles():
     if not (DATA/'db.sqlite').exists(): return []
@@ -122,12 +274,16 @@ def clash_request(path, payload=None):
                                body=json.dumps(payload) if payload is not None else None,
                                headers=headers)
             response = connection.getresponse()
+            if response.status == 401:
+                raise UserError('api_auth_failed')
             if response.status != 200 and response.status != 204:
                 raise UserError('api_unavailable')
             data = response.read(MAX_BODY + 1)
             if len(data) > MAX_BODY:
                 raise UserError('api_unavailable')
             return json.loads(data) if data else {}
+    except UserError:
+        raise
     except Exception:
         raise UserError('api_unavailable') from None
 
@@ -142,28 +298,41 @@ def core_request(action, **args):
         return data.get('result')
     except (OSError,subprocess.TimeoutExpired,ValueError): raise UserError('api_unavailable') from None
 
-def server_groups():
+def server_state():
     try:
-        groups=core_request('groups')
-        if isinstance(groups,list) and len(groups)<=32:
+        groups = core_request('groups')
+        if isinstance(groups, list) and 0 < len(groups) <= 32:
             for group in groups:
-                group['options']=group.get('options',[])[:1000]
-                group['transport']='grpc'
-            return groups
-    except UserError: pass
+                group['options'] = group.get('options', [])[:1000]
+                group['transport'] = 'grpc'
+            return {'groups': groups, 'error': ''}
+    except UserError:
+        pass
     try:
-        data=clash_request('/proxies').get('proxies',{})
-        if not isinstance(data,dict) or len(data)>10000: return []
-        result=[]
-        for name,group in data.items():
-            if group.get('type')!='Selector': continue
-            names=group.get('all',[])
-            if not isinstance(names,list) or len(names)>10000: continue
-            result.append({'name':str(name)[:512],'now':str(group.get('now',''))[:512],
-                           'options':[v for v in names[:1000] if isinstance(v,str) and len(v)<=512]})
-            if len(result)>=32: break
-        return result
-    except (UserError,ValueError,TypeError): return []
+        data = clash_request('/proxies').get('proxies', {})
+        if not isinstance(data, dict) or len(data) > 10000:
+            raise UserError('api_unavailable')
+        result = []
+        for name, group in data.items():
+            if not isinstance(group, dict) or group.get('type') != 'Selector':
+                continue
+            names = group.get('all', [])
+            if not isinstance(names, list) or len(names) > 10000:
+                continue
+            result.append({'name': str(name)[:512], 'now': str(group.get('now', ''))[:512],
+                           'options': [value for value in names[:1000]
+                                       if isinstance(value, str) and len(value) <= 512]})
+            if len(result) >= 32:
+                break
+        return {'groups': result, 'error': '' if result else 'api_unavailable'}
+    except UserError as error:
+        return {'groups': [], 'error': str(error)}
+    except (ValueError, TypeError, AttributeError):
+        return {'groups': [], 'error': 'api_unavailable'}
+
+
+def server_groups():
+    return server_state()['groups']
 
 def choose_server(req):
     group=req.get('group');name=req.get('name')
@@ -180,10 +349,12 @@ def inspect():
     for entry in SCHEMA.values():
         e=dict(entry);e['value']=prefs.get('flutter.'+e['key'],e['default']);e['stored']='flutter.'+e['key'] in prefs
         result.append(e)
+    servers = server_state() if running() else {'groups': [], 'error': 'api_unavailable'}
     return {'installed':installed(),'version':version() if installed() else '',
             'compatible':compatible() if installed() else False,'running':running(),
+            'recoveryPending':(STATE / 'pending-write.json').exists(),
             'settings':result,'profiles':profiles(),'fingerprint':fingerprint(),
-            'serverGroups':server_groups() if running() else [],'hasBackup': (STATE/'backups').exists() and any((STATE/'backups').iterdir())}
+            'serverGroups':servers['groups'],'serverError':servers['error'],'hasBackup': (STATE/'backups').exists() and any((STATE/'backups').iterdir())}
 
 def fingerprint(): return hashlib.sha256(PREFS.read_bytes() if PREFS.exists() else b'').hexdigest()
 
@@ -211,7 +382,7 @@ def validate_changes(changes):
             if len(nums)==2 and nums[0]>nums[1]: raise UserError('invalid_range')
     return changes
 
-def write_settings(req):
+def write_settings(req, backup=None):
     changes=validate_changes(req.get('changes'))
     require_offline()
     # Compare against the file after graceful exit: the app may flush on exit.
@@ -221,7 +392,7 @@ def write_settings(req):
         expected=baseline.get(k)
         actual=current.get('flutter.'+k,SCHEMA[k]['default'])
         if expected!=actual: raise UserError('settings_changed')
-    backup=snapshot()
+    backup=backup or snapshot()
     for k,v in changes.items():
         if v is None: current.pop('flutter.'+k,None)
         else: current['flutter.'+k]=v
@@ -249,7 +420,7 @@ class HTTPSRedirect(urllib.request.HTTPRedirectHandler):
         return super().redirect_request(req,fp,code,msg,headers,newurl)
 
 def download(url):
-    req=urllib.request.Request(validate_url(url),headers={'User-Agent':'Hiddify/5.5.5 OmarchyWidget/2.0','Accept-Encoding':'identity'})
+    req=urllib.request.Request(validate_url(url),headers={'User-Agent':'Omarchy-Hiddify/2.3','Accept-Encoding':'identity'})
     opener=urllib.request.build_opener(HTTPSRedirect())
     try:
         with opener.open(req,timeout=20) as response:
@@ -320,14 +491,14 @@ def valid_id(value):
     try: return str(uuid.UUID(value))
     except Exception: raise UserError('profile_not_found') from None
 
-def commit_import(req):
+def commit_import(req, backup=None):
     token=req.get('token','')
     if not re.fullmatch('[a-f0-9]{32}',token): raise UserError('invalid_subscription')
     folder=STATE/'staging'/token; meta=read_json(folder/'metadata.json')
     if not meta or time.time()-(folder/'metadata.json').stat().st_mtime>900: raise UserError('import_expired')
     require_offline()
     if not (DATA/'db.sqlite').exists(): raise UserError('initialize_app')
-    backup=snapshot()
+    backup=backup or snapshot()
     with dbconnect(DATA/'db.sqlite') as db:
         existing=db.execute('SELECT id FROM profile_entries WHERE url=?',(meta['url'],)).fetchone()
         pid=meta['id'] or (existing[0] if existing else str(uuid.uuid4()))
@@ -368,33 +539,24 @@ def commit_import(req):
     shutil.rmtree(folder)
     return {'message':'imported','backup':backup.name}
 
-def select_profile(req):
+def select_profile(req, backup=None):
     pid=valid_id(req.get('id'));require_offline()
-    backup=snapshot()
+    backup=backup or snapshot()
     with dbconnect(DATA/'db.sqlite') as db:
         if not db.execute('SELECT 1 FROM profile_entries WHERE id=?',(pid,)).fetchone(): raise UserError('profile_not_found')
         db.execute('UPDATE profile_entries SET active=(id=?)',(pid,))
     return {'message':'profile_selected','backup':backup.name}
 
-def restore():
+def restore(backup=None):
     require_offline()
-    folders=sorted((STATE/'backups').iterdir(),key=lambda p:p.name) if (STATE/'backups').exists() else []
-    if not folders: raise UserError('no_backup')
-    folder=folders[-1]
-    # Snapshot current state too, so undo itself remains reversible.
-    current=snapshot()
-    for file in ('shared_preferences.json','db.sqlite'):
-        src=folder/file
-        if src.exists():
-            if file=='db.sqlite':
-                with dbconnect(src) as source, dbconnect(DATA/file) as dest: source.backup(dest)
-            else: atomic(DATA/file,src.read_bytes())
-    operation=read_json(folder/'operation.json',{})
-    if operation.get('profile'):
-        pid=valid_id(operation['profile']);dest=DATA/'configs'/(pid+'.json')
-        if operation['hadConfig']: atomic(dest,(folder/(pid+'.json')).read_bytes())
-        else: dest.unlink(missing_ok=True)
-    return {'message':'restored','backup':current.name}
+    folders = sorted((path for path in (STATE / 'backups').iterdir()
+                      if path.is_dir() and path != backup and not path.name.startswith('.')),
+                     key=lambda path: path.stat().st_mtime_ns) if (STATE / 'backups').exists() else []
+    if not folders:
+        raise UserError('no_backup')
+    current = backup or snapshot()
+    restore_snapshot(folders[-1])
+    return {'message': 'restored', 'backup': current.name}
 
 UPDATE_API_URL = 'https://api.github.com/repos/hiddify/hiddify-app/releases?per_page=20'
 UPDATE_INTERVAL = 3600
@@ -578,13 +740,16 @@ def main(req):
     if action=='open': launch();return {'message':'opened'}
     if action=='prepare_import': return prepare_import(req)
     if action=='validate_settings': validate_changes(req.get('changes'));return {'message':'validated'}
-    if action not in ('save_settings','commit_import','select_profile','restore'): raise UserError('unknown_action')
+    if action not in ('save_settings','commit_import','select_profile','restore','recover_write'): raise UserError('unknown_action')
     private_state()
     with (STATE/'write.lock').open('a') as lock:
         try: fcntl.flock(lock,fcntl.LOCK_EX|fcntl.LOCK_NB)
         except BlockingIOError: raise UserError('busy') from None
-        result={'save_settings':lambda:write_settings(req),'commit_import':lambda:commit_import(req),
-                'select_profile':lambda:select_profile(req),'restore':restore}[action]()
+        if action == 'recover_write':
+            recover_pending_write()
+            result = {'message': 'recovered'}
+        else:
+            result=perform_write(action, req)
     launch()
     return result
 

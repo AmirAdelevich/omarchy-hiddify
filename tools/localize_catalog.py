@@ -3,6 +3,8 @@ import json,pathlib,re
 root=pathlib.Path(__file__).resolve().parents[1]
 d=json.loads((root/'catalog.json').read_text())
 labels={
+'reduce_animations':('Reduce animations','Уменьшить анимации'),
+'show_sleeping_proxies':('Show sleeping proxies','Показывать спящие серверы'),
 'log-level':('Log level','Уровень журналирования'),
 'ipv6-mode':('IPv6 mode','Режим IPv6'),
 'enable-mixed-port':('Enable local proxy port','Включить порт локального прокси'),

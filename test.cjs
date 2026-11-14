@@ -50,7 +50,7 @@ for(const setting of settings) {
    assert(typeof setting.options_ru[option]==='string',setting.key);
  }
 }
-console.log('System language precedence, plural forms and all 91 bilingual settings passed');
+console.log('System language precedence, plural forms and all '+settings.length+' bilingual settings passed');
 
 const modeItems = Array.from({length:4}, (_,i) => ({isSeparator:false,hasChildren:false,checkState:i===2?2:0}));
 assert.equal(model.serviceModeEntries(modeItems).length,4);
@@ -74,3 +74,9 @@ for (const key of Object.keys(en)) {
 for (const key of ['quick_settings','mode_proxy','mode_system_proxy','mode_vpn','mode_router',
                    'stable_release','prerelease','update_available_kind','installer_current','installer_updating'])
   assert(typeof en[key] === 'string' && typeof ru[key] === 'string',key);
+
+for (const [text, expected] of [["Disconnect","on"],["Отключить","on"],["Connect","off"],["Подключить","off"],["Connecting…","starting"],["Disconnecting…","stopping"],["Applying changes…","reloading"],["Unrecognized","unknown"]])
+  assert.equal(model.connectionState({text:text}),expected);
+assert.equal(model.connectionState(null),"unknown");
+for (const state of ["on","off","unknown","starting","stopping","reloading"])
+  for (const catalog of [en,ru]) assert(typeof catalog["status_"+state] === "string");

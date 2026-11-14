@@ -76,16 +76,18 @@ class BackendTests(unittest.TestCase):
    with self.assertRaises(b.UserError):b.choose_server({'group':'select','name':'injected'})
  def test_local_api_redirect_is_rejected(self):
   with self.assertRaises(b.UserError):b.NoRedirect().redirect_request(None,None,302,'',{},'https://external.invalid')
- def test_installer_downloads_using_omarchy(self):
+ def test_installer_uses_the_shared_official_updater(self):
   bins=self.root/'bin';bins.mkdir();log=self.root/'install.log'
-  for repository in [True,False]:
-   for name,body in [('pacman','exit '+('0' if repository else '1')),('omarchy','printf "%s\\n" "$*" > "$INSTALL_LOG"')]:
-    file=bins/name;file.write_text('#!/bin/sh\n'+body+'\n');file.chmod(0o755)
-   env={**os.environ,'PATH':str(bins),'INSTALL_LOG':str(log)}
-   subprocess.run(['/bin/bash',str(b.ROOT/'install.sh')],env=env,check=True,capture_output=True)
-   self.assertEqual(log.read_text().strip(),'pkg add hiddify' if repository else 'pkg aur add hiddify')
- def test_install_script_fixed_commands(self):
+  (bins/'dirname').symlink_to('/usr/bin/dirname')
+  command=bins/'python3'
+  command.write_text('#!/bin/sh\nprintf "%s\\n" "$*" > "$INSTALL_LOG"\n')
+  command.chmod(0o755)
+  env={**os.environ,'PATH':str(bins),'INSTALL_LOG':str(log)}
+  subprocess.run(['/bin/bash',str(b.ROOT/'install.sh'),'--language','ru'],env=env,check=True,capture_output=True)
+  self.assertEqual(log.read_text().strip(),'update_hiddify.py --language ru')
+ def test_install_script_never_runs_a_downloaded_script(self):
   source=(b.ROOT/'install.sh').read_text()
-  self.assertIn('omarchy pkg add hiddify',source);self.assertIn('omarchy pkg aur add hiddify',source)
+  self.assertIn('python3 update_hiddify.py "$@"',source)
   self.assertNotIn('curl',source)
+  self.assertNotIn('aur',source)
 if __name__=='__main__':unittest.main()

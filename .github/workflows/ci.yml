@@ -19,6 +19,12 @@ jobs:
           cache-dependency-path: corebridge/go.sum
       - run: python -W error::ResourceWarning -m unittest discover -s . -p 'test_*.py'
       - run: node test.cjs
-      - run: go test ./...
+      - run: go test -race ./...
         working-directory: corebridge
       - run: bash -n install.sh update-hiddify.sh
+      - run: go run golang.org/x/vuln/cmd/govulncheck@v1.9.0 -scan module
+        working-directory: corebridge
+      - run: |
+          CGO_ENABLED=0 GOOS=linux GOARCH=amd64 GOAMD64=v1 GOEXPERIMENT=nodwarf5 go build -buildvcs=false -trimpath -ldflags='-s -w' -o /tmp/corebridge-rebuilt .
+          cmp ../corebridge-bin /tmp/corebridge-rebuilt
+        working-directory: corebridge

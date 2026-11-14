@@ -1,5 +1,15 @@
 import json,pathlib
 rows={
+'api_auth_failed':('Hiddify’s local API rejected its saved key. Open the app’s server list.','Локальный API Hiddify отклонил сохранённый ключ. Откройте серверы в приложении.'),
+'status_unknown':('Unknown status','Статус неизвестен'),
+'status_starting':('Connecting…','Подключение…'),
+'status_stopping':('Disconnecting…','Отключение…'),
+'status_reloading':('Applying…','Применение…'),
+'invalid_backup':('The backup is incomplete or invalid.','Резервная копия неполная или повреждена.'),
+'recovery_close_app':('Close Hiddify before recovering the interrupted operation.','Закройте Hiddify для восстановления прерванной операции.'),
+'recovery_pending':('An interrupted operation needs recovery.','Нужно восстановить данные после прерванной операции.'),
+'recover_data':('Recover data · restart Hiddify','Восстановить данные · перезапуск'),
+'recovered':('Data recovered. Hiddify is starting.','Данные восстановлены. Hiddify запускается.'),
 'terminal_close':('Press Enter to close.','Нажмите Enter, чтобы закрыть.'),
 'update_terminal_failed':('Could not complete the Hiddify update. Check the terminal.','Не удалось завершить обновление Hiddify. Проверьте сообщение в терминале.'),
 'update_plugin':('Update extension','Обновить плагин'),

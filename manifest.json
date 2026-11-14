@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "id": "msi.hiddify",
   "name": "Hiddify",
-  "version": "2.2.0",
+  "version": "2.3.0",
   "author": "AmirAdelevich",
   "description": "Hiddify control panel with automatic installation, subscription import and native settings",
   "kinds": [

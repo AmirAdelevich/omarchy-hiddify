@@ -117,6 +117,24 @@ func groups(data []byte) ([]Group, error) {
 	}
 	return result, nil
 }
+func firstMessage(ctx context.Context, conn *grpc.ClientConn, method string) ([]byte, error) {
+	stream, err := conn.NewStream(ctx, &grpc.StreamDesc{ServerStreams: true}, method)
+	if err != nil {
+		return nil, err
+	}
+	if err := stream.SendMsg([]byte{}); err != nil {
+		return nil, err
+	}
+	if err := stream.CloseSend(); err != nil {
+		return nil, err
+	}
+	var data []byte
+	if err := stream.RecvMsg(&data); err != nil {
+		return nil, err
+	}
+	return data, nil
+}
+
 func perform() (any, error) {
 	var req struct {
 		Action string `json:"action"`
@@ -141,17 +159,24 @@ func perform() (any, error) {
 		return nil, err
 	}
 	defer conn.Close()
-	if req.Action == "groups" {
-		stream, err := conn.NewStream(ctx, &grpc.StreamDesc{ServerStreams: true}, "/hcore.Core/OutboundsInfo")
+	if req.Action == "groups" || req.Action == "status" {
+		data, err := firstMessage(ctx, conn, "/hcore.Core/CoreInfoListener")
 		if err != nil {
 			return nil, err
 		}
-		if err = stream.SendMsg([]byte{}); err != nil {
+		_, values, err := fields(data)
+		if err != nil {
 			return nil, err
 		}
-		stream.CloseSend()
-		var data []byte
-		if err = stream.RecvMsg(&data); err != nil {
+		state := values[1]
+		if req.Action == "status" {
+			return map[string]any{"state": state}, nil
+		}
+		if state == 0 || state == 3 {
+			return []Group{}, nil
+		}
+		data, err = firstMessage(ctx, conn, "/hcore.Core/MainOutboundsInfo")
+		if err != nil {
 			return nil, err
 		}
 		return groups(data)

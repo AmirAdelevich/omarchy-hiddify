@@ -4,6 +4,8 @@ Only metadata is generated; upstream code is never executed.
 """
 import json,re,sys,pathlib
 base=pathlib.Path(sys.argv[1]); entries={}; enums={}
+catalog_path=pathlib.Path(__file__).resolve().parents[1]/'catalog.json'
+previous={e['key']:e for e in json.loads(catalog_path.read_text())['entries']}
 for p in base.joinpath('lib').rglob('*.dart'):
  text=p.read_text()
  for name,body in re.findall(r'enum\s+(\w+)\s*\{(.*?)(?:;|\})',text,re.S):
@@ -46,7 +48,7 @@ for file in files:
   if default is None and typ=='bool': default=False
   if default is None and typ=='int': default=0
   if default is None and typ=='String': default=''
-  if k in ['intro_completed','started_by_user','store_reviewed_by_user','window_position','window_size','window_maximized','last_seen_crash_report','profiles_sort','auto_apps_selection_region','auto_apps_selection_last_update','auto_apps_selection_off_by_user','warp-consent-given','psiphon-consent-given','log-filter-category']: continue
+  if k in ['intro_completed','started_by_user','store_reviewed_by_user','window_position','window_size','window_maximized','last_seen_crash_report','profiles_sort','auto_apps_selection_region','auto_apps_selection_last_update','auto_apps_selection_off_by_user','warp-consent-given','psiphon-consent-given','log-filter-category','first_used_at','telegram_channel_offered_at']: continue
   label=re.sub(r'(?<!^)(?=[A-Z])',' ',m[1]).capitalize()
   if file.startswith('core'): group='general'
   elif any(x in k for x in ['warp','psiphon','unblocker','extra-security','chain']): group='chain'
@@ -58,7 +60,10 @@ for file in files:
 # User-facing preferences implemented outside PreferencesNotifier.
 for k,default,opts in [('theme_mode','system',['system','light','dark','black']),('locale','en',[]),('enable_analytics',False,[])]:
  entries[k]={'key':k,'name':k,'label':k.replace('_',' ').capitalize(),'type':'boolean' if isinstance(default,bool) else 'string','default':default,'options':opts,'group':'general','secret':False}
+for entry in entries.values():
+ for field in ('label_en','label_ru','options_en','options_ru'):
+  if field in previous.get(entry['key'],{}):entry[field]=previous[entry['key']][field]
 # Labels are independently maintained by localize_catalog.py.
-output={'hiddifyVersion':'5.5.5','sourceCommit':'v5.5.5','entries':list(entries.values())}
+output={'hiddifyVersion':'5.9.2','supportedVersions':['5.5.5','5.9.0','5.9.1','5.9.2'],'databaseVersions':[7],'sourceCommit':'v5.9.2','entries':list(entries.values())}
 pathlib.Path(__file__).resolve().parents[1].joinpath('catalog.json').write_text(json.dumps(output,ensure_ascii=False,indent=2)+'\n')
 print('Generated',len(entries),'typed settings')

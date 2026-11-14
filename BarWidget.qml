@@ -50,7 +50,9 @@ Ui.Panel {
       if (Model.isHiddify(items[i].id, items[i].title)) return items[i]
     return null
   }
-  readonly property bool connected: !!trayItem && String(trayItem.icon).indexOf("tray_icon_connected") !== -1
+  readonly property string connectionState: trayItem
+    ? Model.connectionState(Model.menuAction(nativeMenu.children.values, "connection")) : "off"
+  readonly property bool connected: connectionState === "on" || connectionState === "reloading"
   readonly property var settingsRows: {
     var q = query.toLowerCase()
     return settingsData.filter(function(e) {
@@ -154,7 +156,11 @@ Ui.Panel {
     if (installationAttempted || busy) return
     installationAttempted = true
     showMessage("installing", false)
-    Quickshell.execDetached(["omarchy", "launch", "terminal", "bash", Qt.resolvedUrl("install.sh").toString().replace(/^file:\/\//, "")])
+    Quickshell.execDetached(["omarchy", "launch", "terminal", "bash", Qt.resolvedUrl("install.sh").toString().replace(/^file:\/\//, ""), "--language", strings.language])
+  }
+  function connectionStatusText() {
+    var keys = {on:"status_on", off:"status_off", starting:"status_starting", stopping:"status_stopping", reloading:"status_reloading"}
+    return t(keys[connectionState] || "status_unknown")
   }
   function connectionButtonText() {
     var keys = root.connected
@@ -171,7 +177,7 @@ Ui.Panel {
     entry.triggered()
   }
   function offline(payload) {
-    if (busy || !appData.compatible) return
+    if (busy || (!appData.compatible && payload.action !== "recover_write")) return
     if (!trayItem && !appData.running) { run(payload); return }
     var quit = Model.menuAction(nativeMenu.children.values, "quit")
     if (!quit || !quit.enabled) { showMessage("menu_not_ready", true); return }
@@ -354,7 +360,7 @@ Ui.Panel {
             Layout.fillWidth: true
           }
           Plain {
-            text: root.t(root.connected ? "status_on" : "status_off")
+            text: root.connectionStatusText()
             font.bold: true
             opacity: root.connected ? 1 : 0.65
           }
@@ -404,6 +410,12 @@ Ui.Panel {
           Plain { text: root.t("not_installed"); wrapMode: Text.Wrap; Layout.fillWidth: true }
           ActionButton { text: root.t("retry_install"); onClicked: { root.installationAttempted = false; root.install() } }
         }
+        ColumnLayout {
+          visible: !!root.appData.recoveryPending
+          Layout.fillWidth: true
+          Plain { text: root.t("recovery_pending"); wrapMode: Text.Wrap; Layout.fillWidth: true }
+          ActionButton { text: root.t("recover_data"); onClicked: root.offline({action:"recover_write"}) }
+        }
         QQC.ScrollView {
           Layout.fillWidth: true
           Layout.fillHeight: true
@@ -434,7 +446,7 @@ Ui.Panel {
               ActionButton {
                 Layout.fillWidth: true
                 text: root.connectionButtonText()
-                enabled: !!root.trayItem && !root.busy
+                enabled: !!root.trayItem && !root.busy && (root.connectionState === "on" || root.connectionState === "off")
                 onClicked: root.toggleConnection()
               }
             }
@@ -565,7 +577,7 @@ Ui.Panel {
           ColumnLayout {
             width: parent.width
             spacing: Commons.Style.spacing.xxl
-            Plain { visible: !(root.serversData).length; text: root.t("api_unavailable"); wrapMode: Text.Wrap; Layout.fillWidth: true }
+            Plain { visible: !(root.serversData).length; text: root.t(root.appData.serverError || "api_unavailable"); wrapMode: Text.Wrap; Layout.fillWidth: true }
             Repeater {
               model: root.serversData
               ColumnLayout {
@@ -713,7 +725,7 @@ Ui.Panel {
     }
     function toggle(): void { root.toggle() }
     function status(): string {
-      return JSON.stringify({updates:root.updateData,serviceMode:root.serviceModeIndex,serviceModes:root.serviceModes.length,language:strings.language,installed:root.appData.installed,version:root.appData.version,
+      return JSON.stringify({updates:root.updateData,connectionState:root.connectionState,serviceMode:root.serviceModeIndex,serviceModes:root.serviceModes.length,language:strings.language,installed:root.appData.installed,version:root.appData.version,
         compatible:root.appData.compatible,available:!!root.trayItem,connected:root.connected,
         menuReady:!!Model.menuAction(nativeMenu.children.values,"connection"),settings:(root.appData.settings || []).length,profiles:(root.profilesData).length,busy:root.busy,panelY:panel.cardOrigin.y,panelHeight:panel.contentHeight,scroll:panel.loadedContent ? panel.loadedContent.settingsScroll : 0})
     }

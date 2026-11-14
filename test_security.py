@@ -65,3 +65,17 @@ class LocalPeerTests(unittest.TestCase):
     def test_non_loopback_rejected(self):
         with self.assertRaises(OSError):
             socket_address(('192.0.2.1', 1234))
+
+class ServerFallbackTests(unittest.TestCase):
+    def test_empty_inactive_service_falls_back_to_clash(self):
+        import backend
+        from unittest import mock
+        payload = {'proxies': {'select': {'type': 'Selector', 'now': 'example', 'all': ['example']}}}
+        with mock.patch.object(backend, 'core_request', return_value=[]), mock.patch.object(backend, 'clash_request', return_value=payload):
+            self.assertEqual(len(backend.server_groups()), 1)
+
+    def test_rejected_session_key_is_reported_without_bypassing_authentication(self):
+        import backend
+        from unittest import mock
+        with mock.patch.object(backend, 'core_request', return_value=[]), mock.patch.object(backend, 'clash_request', side_effect=backend.UserError('api_auth_failed')):
+            self.assertEqual(backend.server_state(), {'groups': [], 'error': 'api_auth_failed'})

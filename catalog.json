@@ -1,6 +1,15 @@
 {
-  "hiddifyVersion": "5.5.5",
-  "sourceCommit": "v5.5.5",
+  "hiddifyVersion": "5.9.2",
+  "supportedVersions": [
+    "5.5.5",
+    "5.9.0",
+    "5.9.1",
+    "5.9.2"
+  ],
+  "databaseVersions": [
+    7
+  ],
+  "sourceCommit": "v5.9.2",
   "entries": [
     {
       "key": "service-mode",
@@ -123,20 +132,6 @@
         "br": "Бразилия",
         "other": "Другой"
       }
-    },
-    {
-      "key": "use-xray-core-when-possible",
-      "name": "useXrayCoreWhenPossible",
-      "label": "Use xray core when possible",
-      "type": "boolean",
-      "default": false,
-      "options": [],
-      "group": "routing",
-      "secret": false,
-      "label_en": "Use xray-core when possible",
-      "label_ru": "Использовать Xray-core, если возможно",
-      "options_en": {},
-      "options_ru": {}
     },
     {
       "key": "use-system-tls-engine",
@@ -1438,6 +1433,20 @@
       "options_ru": {}
     },
     {
+      "key": "show_sleeping_proxies",
+      "name": "showSleepingProxies",
+      "label": "Show sleeping proxies",
+      "type": "boolean",
+      "default": true,
+      "options": [],
+      "group": "general",
+      "secret": false,
+      "label_en": "Show sleeping proxies",
+      "label_ru": "Показывать спящие серверы",
+      "options_en": {},
+      "options_ru": {}
+    },
+    {
       "key": "silent_start",
       "name": "silentStart",
       "label": "Silent start",
@@ -1559,6 +1568,20 @@
       "options_ru": {}
     },
     {
+      "key": "reduce_animations",
+      "name": "reduceAnimations",
+      "label": "Reduce animations",
+      "type": "boolean",
+      "default": false,
+      "options": [],
+      "group": "general",
+      "secret": false,
+      "label_en": "Reduce animations",
+      "label_ru": "Уменьшить анимации",
+      "options_en": {},
+      "options_ru": {}
+    },
+    {
       "key": "action_at_close",
       "name": "actionAtClose",
       "label": "Action at close",
@@ -1666,96 +1689,6 @@
       "secret": false,
       "label_en": "Usage analytics",
       "label_ru": "Отправка статистики",
-      "options_en": {},
-      "options_ru": {}
-    },
-    {
-      "key": "unblocker-warp-endpoint",
-      "label": "Unblocker warp endpoint",
-      "type": "string",
-      "default": "scan",
-      "options": [
-        "profile",
-        "scan",
-        "custom"
-      ],
-      "group": "chain",
-      "secret": false,
-      "label_en": "WARP endpoint source",
-      "label_ru": "Источник точки подключения WARP",
-      "options_en": {
-        "profile": "Assigned by Cloudflare",
-        "scan": "Scan automatically",
-        "custom": "Custom endpoint"
-      },
-      "options_ru": {
-        "profile": "Назначенная Cloudflare",
-        "scan": "Автоматическое сканирование",
-        "custom": "Указать вручную"
-      }
-    },
-    {
-      "key": "unblocker-warp-scanner",
-      "label": "Unblocker warp scanner",
-      "type": "string",
-      "default": "",
-      "options": [],
-      "group": "chain",
-      "secret": false,
-      "label_en": "WARP scanner settings (JSON)",
-      "label_ru": "Настройки сканера WARP (JSON)",
-      "options_en": {},
-      "options_ru": {}
-    },
-    {
-      "key": "unblocker-warp-masque",
-      "label": "Unblocker warp masque",
-      "type": "string",
-      "default": "",
-      "options": [],
-      "group": "chain",
-      "secret": false,
-      "label_en": "WARP MASQUE settings (JSON)",
-      "label_ru": "Настройки MASQUE для WARP (JSON)",
-      "options_en": {},
-      "options_ru": {}
-    },
-    {
-      "key": "unblocker-warp-awg",
-      "label": "Unblocker warp awg",
-      "type": "string",
-      "default": "",
-      "options": [],
-      "group": "chain",
-      "secret": false,
-      "label_en": "WARP AmneziaWG settings (JSON)",
-      "label_ru": "Настройки AmneziaWG для WARP (JSON)",
-      "options_en": {},
-      "options_ru": {}
-    },
-    {
-      "key": "per_app_proxy_include_list",
-      "label": "Per app proxy include list",
-      "type": "string",
-      "default": "",
-      "options": [],
-      "group": "routing",
-      "secret": false,
-      "label_en": "Proxied applications (; separated)",
-      "label_ru": "Приложения через прокси (через ;)",
-      "options_en": {},
-      "options_ru": {}
-    },
-    {
-      "key": "per_app_proxy_exclude_list",
-      "label": "Per app proxy exclude list",
-      "type": "string",
-      "default": "",
-      "options": [],
-      "group": "routing",
-      "secret": false,
-      "label_en": "Bypassed applications (; separated)",
-      "label_ru": "Приложения в обход прокси (через ;)",
       "options_en": {},
       "options_ru": {}
     }

@@ -35,7 +35,7 @@ arch=('{machine}')
 url='https://github.com/hiddify/hiddify-app'
 license=('GPL-3.0-only')
 depends=('fuse3' 'gtk3' 'libayatana-appindicator')
-options=('!strip')
+options=('!strip' '!debug')
 source=('{url}')
 sha256sums=('{digest.removeprefix('sha256:')}')
 
@@ -89,8 +89,18 @@ def main(language='en', check=False):
                 raise RuntimeError(strings['close_app_first'])
             mode_key = 'flutter.service-mode'
             saved_mode = backend.read_json(backend.PREFS, {}).get(mode_key)
-            subprocess.run(['makepkg', '-si'], cwd=work, check=True,
-                           env=dict(backend.os.environ, PKGDEST=directory))
+            environment = dict(backend.os.environ, PKGDEST=directory)
+            subprocess.run(['makepkg', '--syncdeps'], cwd=work, check=True, env=environment)
+            artifacts = subprocess.check_output(['makepkg', '--packagelist'], cwd=work,
+                                                text=True, env=environment).splitlines()
+            if len(artifacts) != 1:
+                raise RuntimeError('Expected one Hiddify package')
+            artifact = pathlib.Path(artifacts[0])
+            if artifact.parent != work or artifact.is_symlink() or not artifact.is_file():
+                raise RuntimeError('Invalid Hiddify package path')
+            if backend.running():
+                raise RuntimeError(strings['close_app_first'])
+            subprocess.run(['sudo', 'pacman', '-U', '--', str(artifact)], check=True)
             if saved_mode in ('vpn', 'proxy', 'system-proxy', 'router') and not backend.running():
                 prefs = backend.read_json(backend.PREFS, {})
                 if prefs.get(mode_key) != saved_mode:

@@ -2,7 +2,7 @@
 
 [Русский](README.ru.md) · English
 
-A Hiddify control panel for the Omarchy Quickshell bar. Connect or disconnect, import subscriptions, choose servers and edit 91 settings from one panel.
+A Hiddify control panel for the Omarchy Quickshell bar. Connect or disconnect, import subscriptions, choose servers and edit 86 settings from one panel.
 
 ![Hiddify panel preview](https://raw.githubusercontent.com/AmirAdelevich/omarchy-hiddify/ce2c5c38aa23a0ceb7f4cf5caa6fbd45073b476e/preview.png)
 
@@ -15,19 +15,19 @@ A Hiddify control panel for the Omarchy Quickshell bar. Connect or disconnect, i
 - Searchable settings for DNS, TUN, ports, routing, TLS fragmentation, WARP, Psiphon and the app.
 - Private backups before settings/profile writes and a restore action.
 - Russian and English labels, options, plural forms, numbers and dates.
-- Automatic Hiddify installation when missing, using Omarchy's package manager in a visible terminal.
+- Automatic Hiddify installation from a verified official release in a visible terminal.
 - Quiet background refresh: stable controls and preserved settings scroll position.
 - Hourly release checks, one notification per new Hiddify version and a manual check/update action.
 
 ## Install
 
-Requires Omarchy Quattro, Python 3 and Hiddify **5.5.5** for native settings/profile writes. The shipped core bridge targets Linux x86_64. Hiddify itself is installed separately through the package manager; its runtime is not bundled in this repository.
+Requires Omarchy Quattro, Python 3 and a supported Hiddify version for native settings/profile writes. The shipped core bridge targets Linux x86_64. Hiddify itself is installed separately through the package manager; its runtime is not bundled in this repository.
 
 ```bash
 omarchy plugin add https://github.com/AmirAdelevich/omarchy-hiddify --enable
 ```
 
-The plugin ID is `msi.hiddify`. Left-click its bar icon to open the panel; right-click to hide the Hiddify window. Use Open app to restore it and the panel switch to toggle the connection. Missing Hiddify is installed through `omarchy pkg add hiddify`, with `omarchy pkg aur add hiddify` as a fallback. Enter any requested password in the installer terminal. Installing from AUR follows the usual AUR build process.
+The plugin ID is `msi.hiddify`. Left-click its bar icon to open the panel; right-click to hide the Hiddify window. Use Open app to restore it and the panel switch to toggle the connection. First installation and updates use the same official GitHub AppImage and verified Arch-package build. Enter any requested password in the installer terminal.
 
 ## Update
 
@@ -43,15 +43,19 @@ The Minimize action moves Hiddify windows to a dedicated hidden Hyprland workspa
 
 The plugin follows the live language selected in **Omarchy Setup → Language**. If no Omarchy language has been selected, it uses `LC_ALL`, `LC_MESSAGES`, `LANGUAGE`, then `LANG`. Russian locales select Russian; English and other locales use English. No shell restart is required when changing the Omarchy language.
 
-All 91 preference labels and supported choice labels have Russian and English text. Technical keys, protocol names and user-supplied server/profile names remain as entered.
+All 86 preference labels and supported choice labels have Russian and English text. Technical keys, protocol names and user-supplied server/profile names remain as entered.
 
 ## Data changes and compatibility
 
-The native adapter targets Hiddify **5.5.5**, matching its preference names and profile database schema. Writes are disabled for other versions; opening the native app remains available.
+The preferences catalog is verified against Hiddify 5.9.2. Native writes support Hiddify 5.5.5, 5.9.0, 5.9.1 and 5.9.2 with the verified v7 profile database schema. Other versions or schemas are refused before writing.
 
 **Apply, subscription import/refresh, profile activation and restore close Hiddify gracefully and restart it. The VPN can disconnect.** Each button identifies this behavior. A backup is made before a write, and writing is refused while the GUI still runs. Other preferences are preserved, and conflicting edits made in Hiddify are detected.
 
 Advanced routing rules, full logs and system autostart are accessed through the native Hiddify pages. This widget does not replace every native app screen. WARP's structured settings are JSON strings; per-app lists use `;` separators.
+
+Complete snapshots include the profile database, preferences and every profile configuration. Writes leave a recovery journal until all files are committed. If a process is interrupted, use Recover data with Hiddify closed. Legacy backups remain readable.
+
+For an AppImage VPN session, Hiddify can keep its active service key only in memory. If the installed-service API is inactive and the saved Clash API key is rejected, the plugin opens the native server list. It does not attempt to bypass authentication.
 
 ## Network, credentials and dependencies
 
@@ -89,7 +93,7 @@ omarchy-shell msi.hiddify status
 ```bash
 python -m unittest discover -s . -p 'test_*.py'
 node test.cjs
-(cd corebridge && go test ./... && go build -trimpath -ldflags='-s -w' -o ../corebridge-bin .)
+(cd corebridge && go test -race ./... && CGO_ENABLED=0 GOEXPERIMENT=nodwarf5 go build -buildvcs=false -trimpath -ldflags='-s -w' -o ../corebridge-bin .)
 omarchy plugin validate .
 ```
 
@@ -99,4 +103,4 @@ Go 1.27.3 or later is required to rebuild the bridge. Write/import tests use tem
 
 Plugin code: [MIT](LICENSE). Go dependency licenses are in [licenses/](licenses/). This is an independent integration for [Hiddify](https://github.com/hiddify/hiddify-app) and [Omarchy](https://github.com/omacom/omarchy), not an official Hiddify or Omarchy release.
 
-Preference keys and supported values were checked against Hiddify app v5.5.5; local gRPC message fields follow hiddify-core's `v2/hcore/hcore.proto`. The adapter and its labels are implemented in this repository. No Hiddify application or core source is compiled into the bridge: the bridge uses the local protocol to communicate with the separately installed application. The supplied preview is an English promotional composition based on a screenshot of this plugin, with an example profile.
+Preference keys, supported values and native tray action labels were checked against Hiddify app v5.9.2; local gRPC message fields follow hiddify-core's `v2/hcore/hcore.proto`. The adapter and its labels are implemented in this repository. No Hiddify application or core source is compiled into the bridge: the bridge uses the local protocol to communicate with the separately installed application. The supplied preview is an English promotional composition based on a screenshot of this plugin, with an example profile.
