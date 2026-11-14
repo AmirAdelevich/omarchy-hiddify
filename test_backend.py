@@ -58,8 +58,9 @@ class BackendTests(unittest.TestCase):
  def test_no_url_or_secrets_in_profiles(self):
   self.prepare();b.main({'action':'commit_import','token':next((b.STATE/'staging').iterdir()).name})
   self.assertNotIn('secret=x',json.dumps(b.profiles()))
- @unittest.skipUnless(pathlib.Path("/usr/lib/hiddify/HiddifyCli").exists(), "Hiddify CLI not installed")
  def test_real_cli_import_prepare_commit(self):
+  try:b.cli_command()
+  except b.UserError:self.skipTest('Hiddify CLI is not installed')
   body=b'trojan://fixture-password@example.invalid:443#Fixture'
   with mock.patch.object(b,'download',return_value=(body,{'subscription-userinfo':'upload=1; download=2; total=0'})):
    result=b.prepare_import({'url':'https://example.org/sub?private=token','name':'Fixture'})

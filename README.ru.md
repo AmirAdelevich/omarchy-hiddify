@@ -1,6 +1,8 @@
-# Hiddify for Omarchy — msi.hiddify 2.0
+# Hiddify for Omarchy — msi.hiddify 2.2.0
 
 Панель Quickshell с общей базой профилей и настройками установленного Hiddify.
+
+![Превью Hiddify](https://raw.githubusercontent.com/AmirAdelevich/omarchy-hiddify/ce2c5c38aa23a0ceb7f4cf5caa6fbd45073b476e/preview.png)
 
 - ЛКМ: собственная панель; ПКМ: свернуть окно Hiddify. Кнопка «Приложение» возвращает окно, переключатель в панели управляет подключением.
 - Обзор подключения и выбор активного профиля.

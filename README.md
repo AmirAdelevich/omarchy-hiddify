@@ -4,7 +4,7 @@
 
 A Hiddify control panel for the Omarchy Quickshell bar. Connect or disconnect, import subscriptions, choose servers and edit 91 settings from one panel.
 
-![Hiddify panel preview](preview.png)
+![Hiddify panel preview](https://raw.githubusercontent.com/AmirAdelevich/omarchy-hiddify/ce2c5c38aa23a0ceb7f4cf5caa6fbd45073b476e/preview.png)
 
 ## Features
 
